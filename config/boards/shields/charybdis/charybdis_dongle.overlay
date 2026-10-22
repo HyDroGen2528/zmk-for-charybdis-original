@@ -1,0 +1,44 @@
+#include "charybdis.dtsi"
+#include <input/processors.dtsi>
+#include <dt-bindings/zmk/input_transform.h>
+
+// Reuse the complete Nano35 layout without scanning any physical pins.
+&kscan0 {
+    compatible = "zmk,kscan-mock";
+    /delete-property/ row-gpios;
+    /delete-property/ diode-direction;
+    columns = <0>;
+    rows = <0>;
+    events = <0>;
+};
+
+/ {
+    // Maintain central RGB state so ZMK can forward controls to both halves.
+    // This strip has no physical output on the dongle.
+    led_strip: virtual_led_strip {
+        compatible = "zmk,led-strip-virtual";
+        chain-length = <1>;
+    };
+
+    split_inputs {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        trackball_split: trackball_split@0 {
+            compatible = "zmk,input-split";
+            reg = <0>;
+        };
+    };
+
+    trackball_listener {
+        compatible = "zmk,input-listener";
+        device = <&trackball_split>;
+
+        scroll {
+            layers = <1>;
+            input-processors = <&zip_xy_scaler 1 70>,
+                               <&zip_xy_to_scroll_mapper>,
+                               <&zip_scroll_transform INPUT_TRANSFORM_Y_INVERT>;
+        };
+    };
+};

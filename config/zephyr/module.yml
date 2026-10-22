@@ -1,0 +1,5 @@
+name: charybdis
+build:
+  cmake: .
+  settings:
+    dts_root: .

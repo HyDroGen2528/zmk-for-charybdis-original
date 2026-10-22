@@ -1,0 +1,7 @@
+description: State-only RGB strip for a dongle that forwards RGB behaviors to peripherals
+compatible: "zmk,led-strip-virtual"
+include: base.yaml
+properties:
+  chain-length:
+    type: int
+    required: true
