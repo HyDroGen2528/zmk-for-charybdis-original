@@ -7,8 +7,9 @@ These patches apply only to the revisions pinned in `config/west.yml`:
 
 Upstream copyright and license notices remain in the generated source copies.
 `config/CMakeLists.txt` copies each selected source into the build directory,
-applies its patch with no fuzz, then compiles that copy instead of the original.
+applies its exact zero-context patch with Git, then compiles that copy instead of the original.
 Dependency checkouts remain unmodified. A failed patch stops configuration.
+No separate `patch` utility is required; the CI image already needs Git for West.
 
 The sensor patch preserves Nano35's shared MOSI/MISO wiring using separate
 command and receive transfers under manual CS, including frame-read segments.

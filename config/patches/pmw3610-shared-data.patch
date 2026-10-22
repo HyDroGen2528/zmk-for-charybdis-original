@@ -1,5 +1,5 @@
---- a/source.c
-+++ b/source.c
+--- a/pmw3610.c
++++ b/pmw3610.c
 @@ -142,0 +143,25 @@
 +/* Nano35 shares MOSI and MISO. Keep address and receive phases separate,
 + * with GPIO chip select held across them, as in the original working driver.

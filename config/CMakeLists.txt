@@ -4,11 +4,12 @@ zephyr_include_directories(include)
 function(nano35_patch_source original patch_name)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/patches/${patch_name})
-  find_program(NANO35_PATCH patch REQUIRED)
+  find_program(NANO35_GIT git REQUIRED)
   get_filename_component(stem ${original} NAME)
   set(patched ${CMAKE_CURRENT_BINARY_DIR}/nano35_compat/${stem})
   configure_file(${original} ${patched} COPYONLY)
-  execute_process(COMMAND ${NANO35_PATCH} --batch --fuzz=0 ${patched}
+  execute_process(COMMAND ${NANO35_GIT} apply --unsafe-paths --unidiff-zero
+                          --directory=${CMAKE_CURRENT_BINARY_DIR}/nano35_compat
                           ${CMAKE_CURRENT_SOURCE_DIR}/patches/${patch_name}
                   RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
   if(NOT result EQUAL 0)
