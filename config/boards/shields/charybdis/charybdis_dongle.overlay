@@ -14,13 +14,6 @@
 };
 
 / {
-    // Maintain central RGB state so ZMK can forward controls to both halves.
-    // This strip has no physical output on the dongle.
-    led_strip: virtual_led_strip {
-        compatible = "zmk,led-strip-virtual";
-        chain-length = <1>;
-    };
-
     split_inputs {
         #address-cells = <1>;
         #size-cells = <0>;

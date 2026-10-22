@@ -17,7 +17,7 @@ Nano35 的 35 鍵實體配置沿用現有 shield。`config/charybdis.keymap` 的
 L5、L7 的上方三列全為無動作；L6 僅保留一般滑鼠三鍵，不會啟用來源的精細操作模式。
 目前拇指鍵可進入 L1／L2，I／O 可進入 L4／L5；L3、L6、L7 未安排實體切層鍵，可在 DYA Studio 自行設定。
 第 1 層的軌跡球捲動改由 dongle 處理，比例為 70 單位／格；其他層維持游標移動。
-RGB 保留在左右半部，dongle 使用沒有實體輸出的 RGB 狀態裝置，讓全域 RGB 控制仍可轉送至兩側。
+RGB 燈效功能已移除，包含左右半部燈條、專用 SPI 匯流排、dongle 虛擬燈條及相關韌體設定。
 PMW3610 驅動固定版本；`config/charybdis.c` 為舊版驅動提供周邊端相容處理，分層邏輯只在 dongle 執行。
 
 GitHub Actions 會依 `build.yaml` 建置以上四種韌體。Studio 的 `studio-rpc-usb-uart` snippet 只套用在 dongle。
@@ -40,7 +40,7 @@ bash /workspace/.zmk-env/build-dya.sh all
 3. 將 dongle 接上電腦 USB，讓左右半部開機並靠近 dongle，自動建立 BLE 配對。Studio 也改連線至 dongle。
 
 左右半部的 USB 保留刷機用途；日常按鍵及軌跡球輸出由 dongle 負責。
-雲端建置可確認韌體可編譯；BLE 配對、RGB、旋鈕及軌跡球仍須在實體鍵盤確認。
+雲端建置可確認韌體可編譯；BLE 配對、旋鈕及軌跡球仍須在實體鍵盤確認。
 
 若只有右半部沒有反應，請先確認 dongle 與右半部來自同一次建置。
 軌跡球的 split input ID 在兩側都必須為 `1`；ZMK v0.3 的探索程式會把 ID `0` 當成尚未完成的通道。

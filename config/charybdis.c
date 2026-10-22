@@ -2,27 +2,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/util.h>
 
-#if defined(CONFIG_SHIELD_CHARYBDIS_DONGLE)
-
-#include <zephyr/drivers/led_strip.h>
-
-// ZMK's global RGB behavior keeps state centrally before forwarding commands.
-// The dongle has no LEDs; actual output happens on the two peripherals.
-static int virtual_strip_update(const struct device *dev, struct led_rgb *pixels, size_t count) {
-    ARG_UNUSED(dev);
-    ARG_UNUSED(pixels);
-    ARG_UNUSED(count);
-    return 0;
-}
-
-static const struct led_strip_driver_api virtual_strip_api = {
-    .update_rgb = virtual_strip_update,
-};
-
-DEVICE_DT_DEFINE(DT_NODELABEL(led_strip), NULL, NULL, NULL, NULL, POST_KERNEL,
-                 CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &virtual_strip_api);
-
-#elif defined(CONFIG_PMW3610) && !defined(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+#if defined(CONFIG_PMW3610) && !defined(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
 #include <zmk/keymap.h>
 
