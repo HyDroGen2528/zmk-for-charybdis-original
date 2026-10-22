@@ -17,6 +17,7 @@ PMW3610 驅動固定版本；`config/charybdis.c` 為舊版驅動提供周邊端
 GitHub Actions 會依 `build.yaml` 建置以上四種韌體。Studio 的 `studio-rpc-usb-uart` snippet 只套用在 dongle。
 下載方式：登入 GitHub，開啟本專案的 **Actions → Build Nano35 dongle firmware**，選擇 `charybdis-Nano35` 分支最近一次成功的執行，在 **Artifacts** 下載 `firmware` ZIP。
 其中包含左右半部、dongle 與設定重置的四個 UF2，檔名格式為 `<shield>-nice_nano_v2-zmk.uf2`。
+另附 `charybdis_right-debug-nice_nano_v2-zmk.uf2` 與 `charybdis_dongle-debug-nice_nano_v2-zmk.uf2`，供連線異常時收集 USB 序列埠記錄；正常使用請選沒有 `debug` 的檔案。
 
 在已設定好的雲端環境可執行：
 
@@ -34,3 +35,11 @@ bash /workspace/.zmk-env/build.sh all
 
 左右半部的 USB 保留刷機用途；日常按鍵及軌跡球輸出由 dongle 負責。
 雲端建置可確認韌體可編譯；BLE 配對、RGB、旋鈕及軌跡球仍須在實體鍵盤確認。
+
+若只有右半部沒有反應，請先確認 dongle 與右半部來自同一次建置。
+軌跡球的 split input ID 在兩側都必須為 `1`；ZMK v0.3 的探索程式會把 ID `0` 當成尚未完成的通道。
+修正 ID 後需同時更新 dongle 與右半部，並重新開機；不需要因為這個 ID 變更再次清除配對。
+若仍無反應，可暫時刷入各自的 `debug` UF2，右半部也以 USB 資料線接到電腦。
+在序列埠工具以 115200、8N1 開啟相應的 USB COM 埠，觀察右手開機、與 dongle 連線，以及按鍵／軌跡球操作的記錄。
+若同時接上 dongle 的 Studio 與記錄序列埠，請選會輸出 ZMK 記錄的那個埠。
+除錯版本保留原本的中央／周邊角色，開啟斷言與堆疊溢位偵測；它不會讓右半部獨立成為 USB 鍵盤。

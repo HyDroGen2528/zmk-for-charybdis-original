@@ -24,9 +24,10 @@
         #address-cells = <1>;
         #size-cells = <0>;
 
-        trackball_split: trackball_split@0 {
+        // Must match the right peripheral and avoid v0.3's zero sentinel.
+        trackball_split: trackball_split@1 {
             compatible = "zmk,input-split";
-            reg = <0>;
+            reg = <1>;
         };
     };
 

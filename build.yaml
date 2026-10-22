@@ -23,3 +23,14 @@ include:
     cmake-args: -DCONFIG_ZMK_STUDIO=y
   - board: nice_nano_v2
     shield: settings_reset
+  # Diagnostic images expose USB serial logs while retaining split BLE roles.
+  - board: nice_nano_v2
+    shield: charybdis_right
+    snippet: zmk-usb-logging
+    artifact-name: charybdis_right-debug-nice_nano_v2-zmk
+    cmake-args: -DCONFIG_ASSERT=y -DCONFIG_STACK_SENTINEL=y
+  - board: nice_nano_v2
+    shield: charybdis_dongle
+    snippet: studio-rpc-usb-uart zmk-usb-logging
+    artifact-name: charybdis_dongle-debug-nice_nano_v2-zmk
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ASSERT=y -DCONFIG_STACK_SENTINEL=y

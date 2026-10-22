@@ -113,9 +113,10 @@
         #address-cells = <1>;
         #size-cells = <0>;
 
-        trackball_split: trackball_split@0 {
+        // ZMK v0.3 uses zero as the "not discovered yet" input-slot sentinel.
+        trackball_split: trackball_split@1 {
             compatible = "zmk,input-split";
-            reg = <0>;
+            reg = <1>;
             device = <&trackball>;
         };
     };
