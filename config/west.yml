@@ -1,18 +1,84 @@
 manifest:
   remotes:
-    - name: zmkfirmware
-      url-base: https://github.com/zmkfirmware
-    - name: DoctorWangWang
-      url-base: https://github.com/DoctorWangWang
+  - name: cormoran
+    url-base: https://github.com/cormoran
   projects:
-    - name: zmk
-      remote: zmkfirmware
-      revision: v0.3
-      import: app/west.yml
-    - name: zmk-pmw3610-driver
-      remote: DoctorWangWang
-      # The peripheral adapter in charybdis.c targets this driver version.
-      revision: 1d9c2c68ca76012e1b1e5f6ef02fa5eadc4ca399
-      
+  - name: zmk
+    remote: cormoran
+    revision: e5c9b6915b56801193e359dd9bad4a167ce0d1b8
+    import: app/west.yml
+  - name: zephyr
+    remote: cormoran
+    revision: 63363d92c475ad203b35e9047cef7ecd8706a6fc
+    import:
+      name-blocklist:
+      - ci-tools
+      - hal_altera
+      - hal_cypress
+      - hal_infineon
+      - hal_microchip
+      - hal_nxp
+      - hal_openisa
+      - hal_xtensa
+      - hal_st
+      - hal_ti
+      - loramac-node
+      - mcuboot
+      - mcumgr
+      - net-tools
+      - openthread
+      - edtt
+      - trusted-firmware-m
+  - name: zmk-feature-custom-settings
+    remote: cormoran
+    revision: c6a7fef3a3be3d3ace5de9a4b0628c6418cd1f3f
+  - name: zmk-feature-default-layer
+    remote: cormoran
+    revision: b25cb5b324da2d9bbc84e1877c775f5b2b7c6845
+  - name: zmk-feature-device-info
+    remote: cormoran
+    revision: 8cedd2dd9f04e19ea5a17b94914dd47a09d8db11
+  - name: zmk-feature-fast-keymap
+    remote: cormoran
+    revision: 21d9af3c2ad694f823ad007b361b091c1e366eee
+  - name: zmk-feature-input-stream
+    remote: cormoran
+    revision: aeb015908a42a7615ccdccc7feb3a10d23132a71
+  - name: zmk-feature-kscan-diagnostics
+    remote: cormoran
+    revision: 1432f7fe0cfe903cd7d3c9931ae6bd6f2e1f328e
+  - name: zmk-feature-module-physical-layout
+    remote: cormoran
+    revision: 4f18de45dc27820725d267916b4cdacc0e0b6cf9
+  - name: zmk-feature-os-detection
+    remote: cormoran
+    revision: 3052679f645b8fc1997275c2eaa6b86bdd55ca01
+  - name: zmk-feature-runtime-combo
+    remote: cormoran
+    revision: d9490e7b5d41c516221d131241009e81740efcee
+  - name: zmk-feature-runtime-macro
+    remote: cormoran
+    revision: 38530962eb7061b60efcb98e84585cfb1f0cb6de
+  - name: zmk-feature-runtime-tapdance
+    remote: cormoran
+    revision: 3ed2c36ed94b16601eeba2ed39a27cc93e9a53ee
+  - name: zmk-feature-watchdog
+    remote: cormoran
+    revision: 84ad14c6c3645dc40b23f45d08ab45418655f912
+  - name: zmk-feature-zephyr-setting-expose
+    remote: cormoran
+    revision: 5c89bc71122840ea46032fc241bef8665b99728a
+  - name: zmk-module-ble-management
+    remote: cormoran
+    revision: 57738cc4fc6ba80e82a7ac57741a0339cb186cd4
+  - name: zmk-module-devtool
+    remote: cormoran
+    revision: 9938a2c73c06d6e65ba2c0b68c9aa044a467eafc
+  - name: zmk-module-runtime-input-processor
+    remote: cormoran
+    revision: decf628d7ce5ed95b520c650824c28ea9de649c1
+  - name: zmk-module-settings-rpc
+    remote: cormoran
+    revision: 78f86df9e6c5edaf57bef3ccbd7f360cfdf49291
   self:
     path: config

@@ -28,7 +28,7 @@ DEVICE_DT_DEFINE(DT_NODELABEL(led_strip), NULL, NULL, NULL, NULL, POST_KERNEL,
 
 // This driver predates split pointing support and always queries the keymap.
 // Peripherals have no keymap: keep it in raw-motion mode, then process layers
-// on the dongle. Pin the driver revision in west.yml alongside this adapter.
+// on the dongle. The source revision is recorded in drivers/pmw3610/README.md.
 BUILD_ASSERT(DT_PROP_LEN(DT_NODELABEL(trackball), scroll_layers) == 0);
 BUILD_ASSERT(DT_PROP_LEN(DT_NODELABEL(trackball), snipe_layers) == 0);
 BUILD_ASSERT(DT_PROP(DT_NODELABEL(trackball), automouse_layer) < 0);

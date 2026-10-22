@@ -2,5 +2,6 @@ if(CONFIG_SHIELD_CHARYBDIS_DONGLE OR
    (CONFIG_SHIELD_CHARYBDIS_RIGHT AND NOT CONFIG_ZMK_SPLIT_ROLE_CENTRAL))
   zephyr_library()
   zephyr_library_sources(charybdis.c)
+  zephyr_library_sources_ifdef(CONFIG_PMW3610 drivers/pmw3610/pmw3610.c)
   zephyr_library_include_directories(${APPLICATION_SOURCE_DIR}/include)
 endif()

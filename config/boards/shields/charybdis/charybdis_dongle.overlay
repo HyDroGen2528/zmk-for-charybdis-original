@@ -1,5 +1,6 @@
 #include "charybdis.dtsi"
 #include <input/processors.dtsi>
+#include <input/processors/runtime-input-processor.dtsi>
 #include <dt-bindings/zmk/input_transform.h>
 
 // Reuse the complete Nano35 layout without scanning any physical pins.
@@ -34,12 +35,26 @@
     trackball_listener {
         compatible = "zmk,input-listener";
         device = <&trackball_split>;
+        input-processors = <&mouse_runtime_input_processor>;
 
         scroll {
             layers = <1>;
-            input-processors = <&zip_xy_scaler 1 70>,
-                               <&zip_xy_to_scroll_mapper>,
+            input-processors = <&zip_xy_to_scroll_mapper>,
+                               <&scroll_runtime_input_processor>,
                                <&zip_scroll_transform INPUT_TRANSFORM_Y_INVERT>;
         };
     };
+};
+
+&scroll_runtime_input_processor {
+    scale-divisor = <70>;
+};
+
+// Runtime processors compare 16-bit HID usage IDs, not usage-page values.
+&mouse_runtime_input_processor {
+    temp-layer-keep-keycodes = <0xe0 0xe1 0xe2 0xe3 0xe4 0xe5 0xe6 0xe7>;
+};
+
+&scroll_runtime_input_processor {
+    temp-layer-keep-keycodes = <0xe0 0xe1 0xe2 0xe3 0xe4 0xe5 0xe6 0xe7>;
 };

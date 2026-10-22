@@ -19,13 +19,13 @@ GitHub Actions 會依 `build.yaml` 建置以上四種韌體。Studio 的 `studio
 其中包含左右半部、dongle 與設定重置的四個 UF2，檔名格式為 `<shield>-nice_nano_v2-zmk.uf2`。
 另附 `charybdis_right-debug-nice_nano_v2-zmk.uf2` 與 `charybdis_dongle-debug-nice_nano_v2-zmk.uf2`，供連線異常時收集 USB 序列埠記錄；正常使用請選沒有 `debug` 的檔案。
 
-在已設定好的雲端環境可執行：
+在已設定好的 DYA 雲端環境可執行：
 
 ```bash
-bash /workspace/.zmk-env/build.sh all
+bash /workspace/.zmk-env/build-dya.sh all
 ```
 
-輸出位於 `/workspace/.zmk-env/firmware/`，工具、建置檔及記錄均留在專案外。
+輸出位於 `/workspace/.zmk-env/dya-workspace/firmware/`，工具、建置檔及記錄均留在專案外。
 
 首次從原本的兩半模式改為 dongle 模式時：
 
@@ -43,3 +43,30 @@ bash /workspace/.zmk-env/build.sh all
 在序列埠工具以 115200、8N1 開啟相應的 USB COM 埠，觀察右手開機、與 dongle 連線，以及按鍵／軌跡球操作的記錄。
 若同時接上 dongle 的 Studio 與記錄序列埠，請選會輸出 ZMK 記錄的那個埠。
 除錯版本保留原本的中央／周邊角色，開啟斷言與堆疊溢位偵測；它不會讓右半部獨立成為 USB 鍵盤。
+
+## DYA Studio 擴充
+
+此分支已改用開發指南指定的 `cormoran/zmk`（`main+dya`）、作者的 Zephyr 4.1，以及 SDK 0.17.0。
+`config/west.yml` 將核心與所有擴充模組固定在確切提交；GitHub Actions 也使用同一份 ZMK 核心的建置 workflow。
+硬體仍為 nice!nano v2，新版板型名稱是 `nice_nano@2.0.0/nrf52840/zmk`，下載的 UF2 檔名維持不變。
+
+已啟用的介面包含：
+
+- Keymap：快速讀取與原始配置比對、即時按鍵顯示，以及執行時 Macro、Combo、Tap Dance。
+- Trackball：游標與捲動兩個 runtime processor，可即時調整軟體感度、旋轉、反向與相關處理；第 1 層預設仍為捲動，比例 1/70。
+- Connection：BLE profile、USB／BLE 優先順序、依連線或 OS 指定預設層。
+- Settings：共用設定、進階設定，以及周邊端的設定 relay。
+- Diagnostics：裝置資訊、左右按鍵掃描診斷、dongle 的 Watchdog 記錄與 Devtool 日誌。
+
+以 Chrome／Edge 開啟 https://studio.dya.cormoran.works ，透過 USB 選擇 dongle 的 Studio 序列埠。
+若日後開啟 Studio 鎖定，可長按 Q 進入第 3 層，再按 W 解除鎖定；目前維持原專案的未鎖定設定。
+
+為保留目前已可用的感測器通訊流程，舊 PMW3610 驅動已納入 `config/drivers/pmw3610/`，使用獨立 binding 名稱避免與 Zephyr 4.1 衝突。
+這一版沒有接上 DYA 的感測器硬體 CPI、暫存器或影像擷取 RPC；這些功能需改用另一套驅動並實機驗證。
+上游 Watchdog relay 註明只保證單一周邊端，因此目前關閉該 relay，保留 dongle 本機的 Watchdog UI；左右半部仍各自記錄故障資訊。
+
+這次包含 ZMK／Zephyr 與 Studio 儲存格式升級，請先備份原本的改鍵設定，三個控制器都使用同一次 DYA 建置的韌體。
+建議依前述 settings_reset 流程清除舊設定後再刷入；這會清除配對及 Studio 改鍵。
+原版韌體可從 GitHub 的 `155e00c` 提交及對應 Actions 成品回復。
+
+開發指南原始資料：https://github.com/cormoran/dya-studio/blob/main/src/content/developerGuide.ts
