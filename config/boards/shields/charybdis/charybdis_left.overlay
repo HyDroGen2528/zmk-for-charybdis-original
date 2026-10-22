@@ -7,7 +7,7 @@
 #include "charybdis.dtsi"
 
 // nice!nano v2 enables its switched VCC rail with P0.13 high.
-// Default off at boot; Studio's nano35/left_vcc_enabled setting can override it.
+// Default off at boot; Studio's nano35_left_vcc_enabled setting can override it.
 &{/EXT_POWER} {
     status = "disabled";
 };

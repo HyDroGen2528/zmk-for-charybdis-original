@@ -12,7 +12,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static const struct gpio_dt_spec vcc =
     GPIO_DT_SPEC_GET_BY_IDX(DT_PATH(ext_power), control_gpios, 0);
 
-ZMK_CUSTOM_SETTING_DEFINE(nano35_left_vcc, "nano35", "left_vcc_enabled",
+/* A settings-only extension uses the registry's already registered RPC namespace. */
+ZMK_CUSTOM_SETTING_DEFINE(nano35_left_vcc, "cormoran_custom_settings", "nano35_left_vcc_enabled",
     ZMK_CUSTOM_SETTING_VALUE_TYPE_BOOL, ZMK_CUSTOM_SETTING_VALUE_BOOL(false),
     ZMK_CUSTOM_SETTING_CONFIDENTIALITY_RPC_PUBLIC,
     ZMK_CUSTOM_SETTING_PERMISSION_UNSECURE, ZMK_CUSTOM_SETTING_PERMISSION_SECURE,
