@@ -7,13 +7,13 @@
 #include "charybdis.dtsi"
 
 // nice!nano v2 enables its switched VCC rail with P0.13 high.
-// Hold it low so old external-power settings cannot turn the unused rail on.
+// Default off at boot; Studio's nano35/left_vcc_enabled setting can override it.
 &{/EXT_POWER} {
     status = "disabled";
 };
 
 &gpio0 {
-    unused_vcc_off {
+    vcc_boot_off {
         gpio-hog;
         gpios = <13 GPIO_ACTIVE_HIGH>;
         output-low;

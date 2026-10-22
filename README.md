@@ -12,12 +12,13 @@
 本分支的省電調整：
 
 - 活動期間的電量量測／更新週期由 60 秒改為 300 秒。沿用原本的閒置停測、恢復活動立即量測；此項主要減少連續使用時的量測次數，省電效益較小。
-- 左半部僅有被動按鍵，停用外部電源驅動，並以 GPIO hog 將 nice!nano v2 的 P0.13 固定為低，關閉未使用的 VCC 輸出；不受先前儲存的外部電源設定影響。
+- 左半部的外部 VCC 預設關閉，開機由 GPIO hog 將 P0.13 設為低；可在 DYA Studio 的進階設定、左半部來源下，修改 `nano35 / left_vcc_enabled` 並儲存。舊版外部電源驅動保持停用，避免其舊設定覆蓋新設定。
 - 右半部保留 VCC 供電，避免軌跡球因共用電源而失效。若右手燈條與軌跡球共用 VCC，韌體無法單獨切斷燈條的待機供電。
 - 僅產生一般版韌體與設定重置檔。除錯版本仍可從原本的 `charybdis-Nano35` 分支取得。
 
-本版保留 +8 dBm 發射功率、BLE 連線參數、30 秒 Idle、未啟用整機深度睡眠，以及 PMW3610 的軟體 125 Hz 回報與既有 REST 時序。
-按鍵配置與 DYA Studio 功能沿用原分支。左半部若自行加裝需要 VCC 的硬體，須先移除本分支的固定斷電設定。
+本版保留 +8 dBm 發射功率、BLE 連線參數與 30 秒 Idle。深度睡眠支援已編入，逾時預設為 0（不自動深睡）；可在 Studio 的 Settings 設定各控制器的睡眠時間。
+PMW3610 預設 CPI 400、交換 XY 並反向兩軸（等同原本方向）、最短回報間隔 8 ms。REST 預設依序為 RUN 128 ms、REST1 取樣 40 ms／降階 9600 ms、REST2 取樣 100 ms／降階 12800 ms、REST3 取樣 500 ms，均可在 Studio 調整。
+按鍵配置沿用原分支。左半部若自行加裝需要 VCC 的硬體，可使用上述設定開啟供電；RGB 韌體功能仍維持移除。
 實際省電量取決於 VCC 接線與外接負載；僅能透過硬體電流量測確認，不能由編譯結果推算續航增幅。
 
 Nano35 的 35 鍵實體配置沿用現有 shield。`config/charybdis.keymap` 的左右上方三列依照
@@ -29,7 +30,7 @@ L5、L7 的上方三列全為無動作；L6 僅保留一般滑鼠三鍵，不會
 目前拇指鍵可進入 L1／L2，I／O 可進入 L4／L5；L3、L6、L7 未安排實體切層鍵，可在 DYA Studio 自行設定。
 第 1 層的軌跡球捲動改由 dongle 處理，比例為 70 單位／格；其他層維持游標移動。
 RGB 燈效功能已移除，包含左右半部燈條、專用 SPI 匯流排、dongle 虛擬燈條及相關韌體設定。
-PMW3610 驅動固定版本；`config/charybdis.c` 為舊版驅動提供周邊端相容處理，分層邏輯只在 dongle 執行。
+PMW3610 使用固定提交的 DYA RPC 驅動，保留 Nano35 共用 MOSI／MISO 資料腳的傳輸方式；游標／捲動分層仍在 dongle 執行。
 
 GitHub Actions 會依 `build.yaml` 建置以上四種韌體。Studio 的 `studio-rpc-usb-uart` snippet 只套用在 dongle。
 下載方式：登入 GitHub，開啟本專案的 **Actions → Build Nano35 SavingPower firmware**，選擇 `CharybdisNano35-SavingPower` 分支最近一次成功的執行，在 **Artifacts** 下載 `firmware` ZIP。
@@ -70,22 +71,34 @@ bash /workspace/.zmk-env/build-dya.sh all
 已啟用的介面包含：
 
 - Keymap：快速讀取與原始配置比對、即時按鍵顯示，以及執行時 Macro、Combo、Tap Dance。
-- Trackball：游標與捲動兩個 runtime processor，可即時調整軟體感度、旋轉、反向與相關處理；第 1 層預設仍為捲動，比例 1/70。
+- Trackball：游標／捲動 runtime processor 與 PMW3610 硬體 CPI、軸向、REST 省電參數、暫存器、診斷及影像擷取／串流；第 1 層預設仍為捲動，比例 1/70。
 - Connection：BLE profile、USB／BLE 優先順序、依連線或 OS 指定預設層。
-- Settings：共用設定、進階設定，以及周邊端的設定 relay。
-- Diagnostics：裝置資訊、左右按鍵掃描診斷、dongle 的 Watchdog 記錄與 Devtool 日誌。
+- Settings：共用設定、進階設定、可調的閒置／深睡時間、左手 VCC，以及周邊端的設定 relay。
+- Diagnostics：裝置資訊、左右按鍵掃描診斷、dongle 與左右半部的 Watchdog 記錄讀取／刪除，以及 Devtool 日誌。
+- Layout：35 鍵配置之外，加入右手軌跡球及旋鈕的示意位置。只保留啟用的右旋鈕，因此其 sensor index 為 0；先前若曾在 Studio 自訂旋鈕綁定，請備份並重新對應。
 
 以 Chrome／Edge 開啟 https://studio.dya.cormoran.works ，透過 USB 選擇 dongle 的 Studio 序列埠。
 目前維持原專案的未鎖定設定；新版鍵位不再包含 Q 長按切層及 W 解鎖。若日後開啟 Studio 鎖定，須先安排解鎖鍵。
 如果先前曾在 Studio 儲存改鍵，刷入新的 keymap 後，儲存設定可能仍會覆蓋韌體預設；
 請先備份，再使用 Studio 的 **Restore Stock Settings** 套用新預設。單純更新鍵位不必清除三個控制器的 BLE 配對。
 
-為保留目前已可用的感測器通訊流程，舊 PMW3610 驅動已納入 `config/drivers/pmw3610/`，使用獨立 binding 名稱避免與 Zephyr 4.1 衝突。
-這一版沒有接上 DYA 的感測器硬體 CPI、暫存器或影像擷取 RPC；這些功能需改用另一套驅動並實機驗證。
-上游 Watchdog relay 註明只保證單一周邊端，因此目前關閉該 relay，保留 dongle 本機的 Watchdog UI；左右半部仍各自記錄故障資訊。
+PMW3610 驅動固定為 `cormoran/zmk-driver-pmw3610-with-custom-studio-rpc@5c34ea0`。
+`config/patches/` 的相容修正在建置目錄套用到來源副本，不修改下載的依賴：
 
-這次包含 ZMK／Zephyr 與 Studio 儲存格式升級，請先備份原本的改鍵設定，三個控制器都使用同一次 DYA 建置的韌體。
-建議依前述 settings_reset 流程清除舊設定後再刷入；這會清除配對及 Studio 改鍵。
+- SPI 保持 GPIO CS 與分開的送位址／讀資料階段，沿用 Nano35 既有共用資料腳接線；一般動作採逐暫存器讀取，影像讀取以最多 240 bytes 分段並全程保持 CS。
+- 動作讀取與 Studio 操作共用 mutex；關閉 force-awake 時清除強制清醒位元。
+- PMW3610 與 Watchdog 的指定來源請求直接送至當前 BLE slot，避免廣播造成錯誤回覆或誤刪另一半部的記錄；僅感測器自動探索使用廣播。
+- Watchdog 回覆使用佇列保留連續的 incident chunks，避免未執行的工作資料被下一筆覆蓋。
+
+Studio 的來源 1／2 是連線 slot，不保證固定代表左／右；請依裝置資訊與感測器探索結果選擇。左半部不建立空的感測器回覆介面。
+調整 PMW3610 設定時選擇感測器 `right` 所在的周邊來源；左手 VCC 在左半部來源的進階設定 `nano35 / left_vcc_enabled`。
+影像擷取會暫停感測器游標輸出，完成或停止後驅動重新初始化恢復；這是感測器偵錯操作，日常使用請停止串流。
+深睡預設關閉。自行開啟後可按鍵喚醒，需重新建立 BLE 連線；軌跡球不作為深睡喚醒來源。USB 供電時沿用 ZMK 的不自動深睡規則。
+編譯與主機端檢查只能確認程式與協定邏輯，實際 SPI 電氣訊號、影像、BLE 轉送、喚醒與耗電仍須在實體鍵盤確認。
+可從 `91e8639` 與其 Actions 成品回復到先前省電版；不用為這次功能擴充清除 BLE 配對。
+
+若從 `155e00c` 等舊版升級到 DYA，包含 ZMK／Zephyr 與 Studio 儲存格式變更，請先備份改鍵，三個控制器都使用同一次 DYA 建置的韌體。
+這種跨版本升級建議依前述 settings_reset 流程清除舊設定；這會清除配對及 Studio 改鍵。由 `91e8639` 更新本版則不需要 settings_reset。
 原版韌體可從 GitHub 的 `155e00c` 提交及對應 Actions 成品回復。
 
 開發指南原始資料：https://github.com/cormoran/dya-studio/blob/main/src/content/developerGuide.ts

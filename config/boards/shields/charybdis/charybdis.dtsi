@@ -2,6 +2,29 @@
 #include <physical_layouts.dtsi>
 
 / {
+    nano35_trackball_layout {
+        compatible = "cormoran,physical-layout-trackball";
+        display-name = "Right Trackball";
+        size = <180>;
+        x = <820>;
+        y = <300>;
+        linked-device-identifiers = "right";
+        linked-subsystems = "cormoran__pmw3610";
+    };
+
+    nano35_encoder_layouts {
+        compatible = "cormoran,physical-layout-rotary-encoders";
+        display-name = "Right Encoder";
+        encoders = <&nano35_right_encoder_layout>;
+    };
+
+    nano35_right_encoder_layout: nano35_right_encoder_layout {
+        compatible = "cormoran,physical-layout-rotary-encoder";
+        size = <80>;
+        x = <1040>;
+        y = <320>;
+    };
+
     Nano35_layout: Nano35_layout {
         compatible = "zmk,physical-layout";
         display-name = "Nano35";
@@ -100,7 +123,7 @@
 
     sensors: sensors {
         compatible = "zmk,keymap-sensors";
-        sensors = <&left_encoder &right_encoder>;
+        sensors = <&right_encoder>;
         triggers-per-rotation = <20>;
     };
 };

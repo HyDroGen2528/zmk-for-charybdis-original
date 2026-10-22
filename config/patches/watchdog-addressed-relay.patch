@@ -1,0 +1,57 @@
+--- a/source.c
++++ b/source.c
+@@ -59,0 +60 @@
++#include <nano35/relay.h>
+@@ -423 +424,19 @@
+-    raise_zmk_watchdog_relay_request(event);
++    uint32_t source;
++    switch (req->which_request_type) {
++    case cormoran_watchdog_Request_get_status_tag:
++        source = req->request_type.get_status.source;
++        break;
++    case cormoran_watchdog_Request_list_incidents_tag:
++        source = req->request_type.list_incidents.source;
++        break;
++    case cormoran_watchdog_Request_delete_incidents_tag:
++        source = req->request_type.delete_incidents.source;
++        break;
++    default:
++        return 0;
++    }
++    int err = nano35_relay_send(source, "wdq", &event, sizeof(event));
++    if (err < 0) {
++        LOG_WRN("Watchdog relay target unavailable: %d", err);
++        return 0;
++    }
+@@ -584,3 +603,6 @@
+-static struct zmk_watchdog_relay_response watchdog_relay_pending_response;
+-
+-static void watchdog_relay_response_process_work_handler(struct k_work *work) {
++/* Retain complete incident pages even when several BLE chunks arrive
++ * before the low-priority worker is scheduled. */
++K_MSGQ_DEFINE(nano35_watchdog_responses, sizeof(struct zmk_watchdog_relay_response), 24, 4);
++
++static void watchdog_relay_response_process_one(
++    const struct zmk_watchdog_relay_response *response) {
+@@ -588,2 +610,2 @@
+-    pb_istream_t istream = pb_istream_from_buffer(watchdog_relay_pending_response.payload,
+-                                                   watchdog_relay_pending_response.size);
++    pb_istream_t istream = pb_istream_from_buffer(response->payload,
++                                                   response->size);
+@@ -595 +617 @@
+-    uint32_t source = watchdog_relay_pending_response.source;
++    uint32_t source = response->source;
+@@ -638,0 +661,7 @@
++static void watchdog_relay_response_process_work_handler(struct k_work *work) {
++    struct zmk_watchdog_relay_response response;
++    while (k_msgq_get(&nano35_watchdog_responses, &response, K_NO_WAIT) == 0) {
++        watchdog_relay_response_process_one(&response);
++    }
++}
++
+@@ -647 +676,4 @@
+-    watchdog_relay_pending_response = *ev;
++    if (k_msgq_put(&nano35_watchdog_responses, ev, K_NO_WAIT) < 0) {
++        LOG_ERR("Watchdog response queue full");
++        return ZMK_EV_EVENT_BUBBLE;
++    }

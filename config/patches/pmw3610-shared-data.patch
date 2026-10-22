@@ -1,0 +1,143 @@
+--- a/source.c
++++ b/source.c
+@@ -142,0 +143,25 @@
++/* Nano35 shares MOSI and MISO. Keep address and receive phases separate,
++ * with GPIO chip select held across them, as in the original working driver.
++ * The nRF SPIM driver does not implement SPI_HALF_DUPLEX. */
++static int nano35_read_transaction(const struct device *dev, uint8_t addr,
++                                   const struct spi_buf_set *rx) {
++    const struct pixart_config *cfg = dev->config;
++    struct spi_config bus = cfg->spi.config;
++    bus.cs.gpio.port = NULL;
++    const struct spi_buf tx_buf = {.buf = &addr, .len = 1};
++    const struct spi_buf_set tx = {.buffers = &tx_buf, .count = 1};
++    int err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 1);
++    if (err < 0) {
++        return err;
++    }
++    k_busy_wait(1);
++    err = spi_write(cfg->spi.bus, &bus, &tx);
++    if (!err) {
++        k_busy_wait(4);
++        err = spi_read(cfg->spi.bus, &bus, rx);
++    }
++    int release_err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 0);
++    k_busy_wait(1);
++    return err ? err : release_err;
++}
++
+@@ -144,15 +169,3 @@
+-    const struct pixart_config *cfg = dev->config;
+-    const struct spi_buf tx_buf = {.buf = &addr, .len = sizeof(addr)};
+-    const struct spi_buf_set tx = {.buffers = &tx_buf, .count = 1};
+-    struct spi_buf rx_buf[] = {
+-        {
+-            .buf = NULL,
+-            .len = sizeof(addr),
+-        },
+-        {
+-            .buf = value,
+-            .len = len,
+-        },
+-    };
+-    const struct spi_buf_set rx = {.buffers = rx_buf, .count = ARRAY_SIZE(rx_buf)};
+-    return spi_transceive_dt(&cfg->spi, &tx, &rx);
++    struct spi_buf rx_buf = {.buf = value, .len = len};
++    const struct spi_buf_set rx = {.buffers = &rx_buf, .count = 1};
++    return nano35_read_transaction(dev, addr, &rx);
+@@ -187,8 +200 @@
+-    const struct pixart_config *cfg = dev->config;
+-    uint8_t addr = PMW3610_REG_MOTION_BURST;
+-    const struct spi_buf tx_buf = {.buf = &addr, .len = sizeof(addr)};
+-    const struct spi_buf_set tx = {.buffers = &tx_buf, .count = 1};
+-
+-    /* rx[0] discards the byte clocked out while `addr` is sent; the rest
+-     * receive the frame in <=PMW3610_BURST_MAX_XFER segments. */
+-    struct spi_buf rx_buf[1 + PMW3610_BURST_MAX_SEGMENTS];
++    struct spi_buf rx_buf[PMW3610_BURST_MAX_SEGMENTS];
+@@ -196,2 +201,0 @@
+-    rx_buf[n++] = (struct spi_buf){.buf = NULL, .len = sizeof(addr)};
+-
+@@ -205,2 +208,0 @@
+-        LOG_ERR("Frame capture (burst): %u px exceeds %u-segment budget", len,
+-                PMW3610_BURST_MAX_SEGMENTS);
+@@ -209 +210,0 @@
+-
+@@ -211 +212 @@
+-    return spi_transceive_dt(&cfg->spi, &tx, &rx);
++    return nano35_read_transaction(dev, PMW3610_REG_MOTION_BURST, &rx);
+@@ -216,10 +217,15 @@
+-    uint8_t write_buf[] = {addr | SPI_WRITE_BIT, value};
+-    const struct spi_buf tx_buf = {
+-        .buf = write_buf,
+-        .len = sizeof(write_buf),
+-    };
+-    const struct spi_buf_set tx = {
+-        .buffers = &tx_buf,
+-        .count = 1,
+-    };
+-    return spi_write_dt(&cfg->spi, &tx);
++    struct spi_config bus = cfg->spi.config;
++    bus.cs.gpio.port = NULL;
++    uint8_t bytes[] = {addr | SPI_WRITE_BIT, value};
++    const struct spi_buf tx_buf = {.buf = bytes, .len = sizeof(bytes)};
++    const struct spi_buf_set tx = {.buffers = &tx_buf, .count = 1};
++    int err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 1);
++    if (err < 0) {
++        return err;
++    }
++    k_busy_wait(1);
++    err = spi_write(cfg->spi.bus, &bus, &tx);
++    k_busy_wait(10);
++    int release_err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 0);
++    k_busy_wait(30);
++    return err ? err : release_err;
+@@ -381,26 +387,9 @@
+-    int err = 0;
+-
+-    if (force_awake_runtime) {
+-        uint8_t value;
+-        err = pmw3610_read_reg(dev, PMW3610_REG_PERFORMANCE, &value);
+-        if (err) {
+-            LOG_ERR("Can't read ref-performance %d", err);
+-            return err;
+-        }
+-        LOG_INF("Get performance register (reg value 0x%x)", value);
+-
+-        uint8_t perf = value & 0x0F; // reset bit[3..0] to 0x0 (normal operation)
+-        if (enabled) {
+-            perf |= 0xF0; // set bit[3..0] to 0xF (force awake)
+-        }
+-        if (perf != value) {
+-            err = pmw3610_write(dev, PMW3610_REG_PERFORMANCE, perf);
+-            if (err) {
+-                LOG_ERR("Can't write performance register %d", err);
+-                return err;
+-            }
+-            LOG_INF("Set performance register (reg value 0x%x)", perf);
+-        }
+-    }
+-
+-    return err;
++    uint8_t value;
++    int err = pmw3610_read_reg(dev, PMW3610_REG_PERFORMANCE, &value);
++    if (err) {
++        return err;
++    }
++    /* Preserve Nano35's 250-Hz sensor mode / ~125-Hz software reporting.
++     * Always clear forced-run bits when the Studio switch is turned off. */
++    uint8_t perf = 0x0D | ((force_awake_runtime && enabled) ? 0xF0 : 0);
++    return perf == value ? 0 : pmw3610_write(dev, PMW3610_REG_PERFORMANCE, perf);
+@@ -565 +554 @@
+-static int pmw3610_report_data(const struct device *dev) {
++static int pmw3610_report_data_locked(const struct device *dev) {
+@@ -680,0 +670,9 @@
++}
++
++/* Serialize motion reads against Studio register/settings/frame operations. */
++static int pmw3610_report_data(const struct device *dev) {
++    struct pixart_data *data = dev->data;
++    k_mutex_lock(&data->lock, K_FOREVER);
++    int err = pmw3610_report_data_locked(dev);
++    k_mutex_unlock(&data->lock);
++    return err;

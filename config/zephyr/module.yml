@@ -1,5 +1,8 @@
 name: charybdis
 build:
+  depends:
+    - zmk-driver-pmw3610-with-custom-studio-rpc
+    - zmk-feature-watchdog
   cmake: .
   settings:
     dts_root: .

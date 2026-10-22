@@ -1,0 +1,19 @@
+--- a/source.c
++++ b/source.c
+@@ -42,0 +43 @@
++#include <nano35/relay.h>
+@@ -389 +390,10 @@
+-    raise_zmk_pmw3610_relay_request(event);
++    uint32_t target = pmw3610_request_get_source(req);
++    if (target == PMW3610_SOURCE_ALL &&
++        req->which_request_type != cormoran_pmw3610_Request_get_info_tag) {
++        return 0;
++    }
++    int err = nano35_relay_send(target, "pmq", event.payload, event.size);
++    if (err < 0) {
++        LOG_WRN("PMW3610 relay target unavailable: %d", err);
++        return 0;
++    }
+@@ -395 +405 @@
+-    ARG_UNUSED(source); /* Transport broadcasts to every peripheral -- see file doc comment. */
++    ARG_UNUSED(source); /* Destination is read from the encoded request below. */
