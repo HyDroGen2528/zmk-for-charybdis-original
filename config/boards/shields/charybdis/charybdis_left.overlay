@@ -6,6 +6,20 @@
 
 #include "charybdis.dtsi"
 
+// nice!nano v2 enables its switched VCC rail with P0.13 high.
+// Hold it low so old external-power settings cannot turn the unused rail on.
+&{/EXT_POWER} {
+    status = "disabled";
+};
+
+&gpio0 {
+    unused_vcc_off {
+        gpio-hog;
+        gpios = <13 GPIO_ACTIVE_HIGH>;
+        output-low;
+    };
+};
+
 &kscan0 {
 	col-gpios
 		= <&gpio0 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>

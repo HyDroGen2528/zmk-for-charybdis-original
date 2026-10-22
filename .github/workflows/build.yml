@@ -1,4 +1,4 @@
-name: Build Nano35 dongle firmware
+name: Build Nano35 SavingPower firmware
 
 on: [push, pull_request, workflow_dispatch]
 
