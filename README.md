@@ -9,7 +9,13 @@
 | `charybdis_right` | 右半部周邊端，傳送按鍵、旋鈕與 PMW3610 軌跡球資料 |
 | `settings_reset` | 清除控制器的配對與儲存設定 |
 
-按鍵配置及 Nano35 的 35 鍵實體配置沿用 `config/charybdis.keymap` 與現有 shield。
+Nano35 的 35 鍵實體配置沿用現有 shield。`config/charybdis.keymap` 的左右上方三列依照
+[Keyball39 V4.0-hotFixed](https://github.com/HyDroGen2528/zmk-dongle-keyball39/blob/V4.0-hotFixed/config%2Fkeyball39.keymap)
+配置，套用以下簡化：防誤觸左鍵改為一般左鍵；巨集、拖曳鎖定、穿透與 Boot 均改為無動作，不移植來源的其他自訂功能。
+保留標準按鍵、滑鼠按鍵、主列長按修飾鍵與 I／O 的長按切層（L4／L5）。
+原有五顆拇指鍵與其既有非穿透綁定保留；L8～L10 也改為無動作，供 Studio 日後配置。
+L5、L7 的上方三列全為無動作；L6 僅保留一般滑鼠三鍵，不會啟用來源的精細操作模式。
+目前拇指鍵可進入 L1／L2，I／O 可進入 L4／L5；L3、L6、L7 未安排實體切層鍵，可在 DYA Studio 自行設定。
 第 1 層的軌跡球捲動改由 dongle 處理，比例為 70 單位／格；其他層維持游標移動。
 RGB 保留在左右半部，dongle 使用沒有實體輸出的 RGB 狀態裝置，讓全域 RGB 控制仍可轉送至兩側。
 PMW3610 驅動固定版本；`config/charybdis.c` 為舊版驅動提供周邊端相容處理，分層邏輯只在 dongle 執行。
@@ -59,7 +65,9 @@ bash /workspace/.zmk-env/build-dya.sh all
 - Diagnostics：裝置資訊、左右按鍵掃描診斷、dongle 的 Watchdog 記錄與 Devtool 日誌。
 
 以 Chrome／Edge 開啟 https://studio.dya.cormoran.works ，透過 USB 選擇 dongle 的 Studio 序列埠。
-若日後開啟 Studio 鎖定，可長按 Q 進入第 3 層，再按 W 解除鎖定；目前維持原專案的未鎖定設定。
+目前維持原專案的未鎖定設定；新版鍵位不再包含 Q 長按切層及 W 解鎖。若日後開啟 Studio 鎖定，須先安排解鎖鍵。
+如果先前曾在 Studio 儲存改鍵，刷入新的 keymap 後，儲存設定可能仍會覆蓋韌體預設；
+請先備份，再使用 Studio 的 **Restore Stock Settings** 套用新預設。單純更新鍵位不必清除三個控制器的 BLE 配對。
 
 為保留目前已可用的感測器通訊流程，舊 PMW3610 驅動已納入 `config/drivers/pmw3610/`，使用獨立 binding 名稱避免與 Zephyr 4.1 衝突。
 這一版沒有接上 DYA 的感測器硬體 CPI、暫存器或影像擷取 RPC；這些功能需改用另一套驅動並實機驗證。
