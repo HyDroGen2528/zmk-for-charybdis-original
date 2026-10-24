@@ -1,0 +1,219 @@
+--- a/setting_expose_relay.c
++++ b/setting_expose_relay.c
+@@ -43,0 +44 @@
++#include <nano35/relay.h>
+@@ -306,9 +307,4 @@
+-/*
+- * Pending targeted request. Written by the RPC thread in
+- * setting_expose_relay_dispatch before the query is broadcast; read on the
+- * relay work queue when replies arrive. `target` filters which peripheral
+- * replies are forwarded (TARGET_ALL forwards all; a specific index forwards
+- * only the matching source). `req_id` (client-chosen) is echoed by peripherals
+- * inside the notification payload so stale replies from a previous request are
+- * dropped.
+- */
++/* One relayed request at a time. Replies are matched before changing this
++ * state; a stalled list expires after five seconds without valid progress. */
++#define NANO35_SE_PENDING_TIMEOUT_MS 5000
++static K_MUTEX_DEFINE(nano35_se_pending_lock);
+@@ -315,0 +312,3 @@
++    bool active;
++    bool sending;
++    bool list;
+@@ -317,0 +317,3 @@
++    uint32_t expected_mask;
++    uint32_t remaining_mask;
++    int64_t expires_at;
+@@ -320,6 +321,0 @@
+-/*
+- * Active TARGET_ALL delete/clear_all transaction. All fields are touched ONLY
+- * on the relay work queue (the reply notify work and the timeout both run
+- * there, single-threaded), except the ones the RPC thread sets once before
+- * raising the query (happens-before the first reply). See DESIGN.md.
+- */
+@@ -331 +327 @@
+-    zmk_setting_expose_Request central_req; /* delete/clear_all to run on the central last */
++    zmk_setting_expose_Request central_req;
+@@ -333,0 +330,8 @@
++/* Caller owns nano35_se_pending_lock. Delete-all uses its existing timeout. */
++static void nano35_se_expire_pending(void) {
++    if (pending.active && !pending.sending && !del_tx.active &&
++        k_uptime_get() >= pending.expires_at) {
++        pending.active = false;
++    }
++}
++
+@@ -368 +372,3 @@
+-    if (!del_tx.active) {
++    k_mutex_lock(&nano35_se_pending_lock, K_FOREVER);
++    if (!del_tx.active || pending.sending) {
++        k_mutex_unlock(&nano35_se_pending_lock);
+@@ -371 +377,4 @@
+-    del_tx.active = false;
++    uint32_t request_id = del_tx.req_id;
++    uint32_t received = del_tx.received;
++    /* Keep the transaction busy while the central store is being changed. */
++    k_mutex_unlock(&nano35_se_pending_lock);
+@@ -380,2 +389,5 @@
+-    LOG_DBG("delete-all complete (req_id=%u, %u peripheral replies)", del_tx.req_id,
+-            del_tx.received);
++    LOG_DBG("delete-all complete (req_id=%u, %u peripheral replies)", request_id, received);
++    k_mutex_lock(&nano35_se_pending_lock, K_FOREVER);
++    del_tx.active = false;
++    pending.active = false;
++    k_mutex_unlock(&nano35_se_pending_lock);
+@@ -384 +396 @@
+-    notify_event.req_id = del_tx.req_id;
++    notify_event.req_id = request_id;
+@@ -391,5 +403 @@
+-    if (del_tx.active) {
+-        LOG_DBG("delete-all timed out waiting for peripherals (got %u/%u)", del_tx.received,
+-                del_tx.expected);
+-        se_relay_finish_delete();
+-    }
++    se_relay_finish_delete();
+@@ -420,3 +427,0 @@
+-    } else if (notify_event.req_id != pending.req_id) {
+-        LOG_DBG("dropping stale relayed notification (req_id %u != %u)", notify_event.req_id,
+-                pending.req_id);
+@@ -424,9 +429,27 @@
+-        notify_event.source = notify_reply.source;
+-        se_relay_emit();
+-
+-        /* Count a delete-all reply and finish once every peripheral has answered.
+-         * A delete/clear_all yields exactly one reply per peripheral (a Response),
+-         * never a list stream, so counting replies is correct. */
+-        if (del_tx.active && notify_event.req_id == del_tx.req_id) {
+-            del_tx.received++;
+-            if (del_tx.received >= del_tx.expected) {
++        bool accepted = false;
++        bool finish_delete = false;
++        uint32_t source = notify_reply.source;
++        k_mutex_lock(&nano35_se_pending_lock, K_FOREVER);
++        nano35_se_expire_pending();
++        if (pending.active && notify_event.req_id == pending.req_id && source > 0 &&
++            source < 32 && (pending.remaining_mask & BIT(source))) {
++            accepted = true;
++            pending.expires_at = k_uptime_get() + NANO35_SE_PENDING_TIMEOUT_MS;
++            bool terminal = !pending.list ||
++                notify_event.which_event == zmk_setting_expose_Notification_list_done_tag ||
++                notify_event.which_event == zmk_setting_expose_Notification_error_tag;
++            if (terminal) {
++                pending.remaining_mask &= ~BIT(source);
++                if (del_tx.active && notify_event.req_id == del_tx.req_id) {
++                    del_tx.received++;
++                    finish_delete = pending.remaining_mask == 0 && !pending.sending;
++                } else if (pending.remaining_mask == 0 && !pending.sending) {
++                    pending.active = false;
++                }
++            }
++        }
++        k_mutex_unlock(&nano35_se_pending_lock);
++        if (accepted) {
++            notify_event.source = source;
++            se_relay_emit();
++            if (finish_delete) {
+@@ -449,4 +472,7 @@
+-    /* Drop replies for a different specific target. `source` is stamped by the
+-     * relay-receive path; the stale-req_id check happens after decode on the
+-     * work queue (req_id is not on the wire). */
+-    if (pending.target != SETTING_EXPOSE_TARGET_ALL && pending.target != reply->source) {
++    /* A queued late reply is checked again by req_id after protobuf decode. */
++    k_mutex_lock(&nano35_se_pending_lock, K_FOREVER);
++    nano35_se_expire_pending();
++    bool expected = pending.active && reply->source > 0 && reply->source < 32 &&
++                    (pending.expected_mask & BIT(reply->source));
++    k_mutex_unlock(&nano35_se_pending_lock);
++    if (!expected) {
+@@ -475,8 +500,0 @@
+-    uint32_t req_id = req->req_id;
+-
+-    /* Remember the target so replies can be filtered as they arrive. */
+-    pending.req_id = req_id;
+-    pending.target = req->target;
+-
+-    /* Broadcast the request (the peripheral ignores target). req_id rides inside
+-     * the encoded Request, so the carrier needs no separate copy. */
+@@ -491,2 +509,32 @@
+-    bool delete_all = (req->target == SETTING_EXPOSE_TARGET_ALL) && request_is_delete(req);
+-
++    uint32_t connected_mask;
++    int err = nano35_relay_connected_sources(&connected_mask);
++    if (err < 0) {
++        return err;
++    }
++    bool all = req->target == SETTING_EXPOSE_TARGET_ALL;
++    if (!all && (req->target == 0 || req->target >= 32)) {
++        return -EINVAL;
++    }
++    uint32_t expected_mask = all ? connected_mask : BIT(req->target);
++    if (!all && !(connected_mask & expected_mask)) {
++        return -ENOTCONN;
++    }
++    bool delete_all = all && request_is_delete(req);
++    if (!expected_mask && !delete_all) {
++        return -ENOTCONN;
++    }
++
++    k_mutex_lock(&nano35_se_pending_lock, K_FOREVER);
++    nano35_se_expire_pending();
++    if (pending.active || del_tx.active) {
++        k_mutex_unlock(&nano35_se_pending_lock);
++        return -EBUSY;
++    }
++    pending.active = true;
++    pending.sending = true;
++    pending.list = req->which_op == zmk_setting_expose_Request_list_tag;
++    pending.req_id = req->req_id;
++    pending.target = req->target;
++    pending.expected_mask = expected_mask;
++    pending.remaining_mask = expected_mask;
++    pending.expires_at = k_uptime_get() + NANO35_SE_PENDING_TIMEOUT_MS;
+@@ -494,7 +541,0 @@
+-        /*
+-         * Ordered delete: tell the peripherals to delete first; defer the
+-         * central's own delete until every peripheral has replied or the
+-         * timeout fires (see se_relay_finish_delete). Last-writer-wins if a new
+-         * delete-all starts before the previous finishes -- the web serializes
+-         * these behind its in-progress state.
+-         */
+@@ -502 +543 @@
+-        del_tx.req_id = req_id;
++        del_tx.req_id = req->req_id;
+@@ -504 +545 @@
+-        del_tx.expected = ZMK_SPLIT_CENTRAL_PERIPHERAL_COUNT;
++        del_tx.expected = __builtin_popcount(expected_mask);
+@@ -505,0 +547,2 @@
++    }
++    k_mutex_unlock(&nano35_se_pending_lock);
+@@ -507,3 +550,19 @@
+-        raise_se_relay_query(query);
+-
+-        k_work_schedule_for_queue(
++    /* SEq carries only the encoded protobuf. Only an explicit ALL broadcasts. */
++    err = nano35_relay_send(all ? UINT32_MAX : req->target, "SEq", query.data, query.len);
++    k_mutex_lock(&nano35_se_pending_lock, K_FOREVER);
++    pending.sending = false;
++    if (err < 0) {
++        pending.active = false;
++        if (delete_all) {
++            del_tx.active = false;
++        }
++        k_mutex_unlock(&nano35_se_pending_lock);
++        return err;
++    }
++    pending.expires_at = k_uptime_get() + NANO35_SE_PENDING_TIMEOUT_MS;
++    bool complete = pending.remaining_mask == 0;
++    if (complete && !delete_all) {
++        pending.active = false;
++    }
++    if (delete_all) {
++        k_work_reschedule_for_queue(
+@@ -511,3 +570 @@
+-            K_MSEC(del_tx.expected == 0 ? 0 : CONFIG_ZMK_SETTING_EXPOSE_DELETE_ALL_TIMEOUT_MS));
+-    } else {
+-        raise_se_relay_query(query);
++            K_MSEC(complete ? 0 : CONFIG_ZMK_SETTING_EXPOSE_DELETE_ALL_TIMEOUT_MS));
+@@ -515 +572 @@
+-
++    k_mutex_unlock(&nano35_se_pending_lock);

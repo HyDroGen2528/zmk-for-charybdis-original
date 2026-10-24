@@ -1,0 +1,13 @@
+--- a/behavior_runtime_sensor_rotate.c
++++ b/behavior_runtime_sensor_rotate.c
+@@ -19,0 +20,1 @@
++#include <nano35/behavior_queue.h>
+@@ -376,2 +377,6 @@
+-        zmk_behavior_queue_add(&event, triggered_binding, true, triggered_binding_data.tap_ms);
+-        zmk_behavior_queue_add(&event, triggered_binding, false, 0);
++        int ret = nano35_behavior_queue_add_tap(&event, triggered_binding,
++                                                triggered_binding_data.tap_ms);
++        if (ret < 0) {
++            LOG_WRN("Sensor %d layer %d: behavior queue full; dropped one tap",
++                    sensor_index, event.layer);
++        }

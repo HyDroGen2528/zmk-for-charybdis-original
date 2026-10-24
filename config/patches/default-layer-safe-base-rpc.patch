@@ -1,0 +1,7 @@
+--- a/default_layer_handler.c
++++ b/default_layer_handler.c
+@@ -84 +84,3 @@
+-    out->layer_count = ZMK_KEYMAP_LAYERS_LEN;
++    /* This count feeds Connection's default-layer selector only. The core
++     * keymap RPC continues to expose every layer for editing. */
++    out->layer_count = MIN(CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX + 1, ZMK_KEYMAP_LAYERS_LEN);

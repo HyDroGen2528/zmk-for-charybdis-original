@@ -62,6 +62,9 @@ manifest:
   - name: zmk-feature-runtime-tapdance
     remote: cormoran
     revision: 3ed2c36ed94b16601eeba2ed39a27cc93e9a53ee
+  - name: zmk-behavior-runtime-sensor-rotate
+    remote: cormoran
+    revision: 8b1125ed676c1f5e14145d217984f33d0ebdcef4
   - name: zmk-feature-watchdog
     remote: cormoran
     revision: 84ad14c6c3645dc40b23f45d08ab45418655f912

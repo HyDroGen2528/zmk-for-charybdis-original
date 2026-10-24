@@ -1,0 +1,49 @@
+--- a/default_layer.c
++++ b/default_layer.c
+@@ -30,0 +31,5 @@
++BUILD_ASSERT(CONFIG_ZMK_DEFAULT_LAYER_MIN_INDEX >= 0 &&
++                 CONFIG_ZMK_DEFAULT_LAYER_MIN_INDEX <= CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX &&
++                 CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX < ZMK_KEYMAP_LAYERS_LEN,
++             "Default layer range must fit the keymap");
++
+@@ -52,3 +57,3 @@
+- * NO_CONSTRAINT (not RANGE_INT32) is used because the negative sentinels
+- * (UNSET, OS_DETECTION) fall outside a plain layer-index range - values are
+- * validated in is_valid_layer_value() instead.
++ * For a zero-based allowed range, the negative sentinels and layer indices
++ * form one range. Enforce it for generic custom-settings writes as well.
++ * Nonzero minima still use the setter/resolution checks below.
+@@ -55,0 +61,11 @@
++#if CONFIG_ZMK_DEFAULT_LAYER_MIN_INDEX == 0
++#define ENDPOINT_LAYER_CONSTRAINT \
++    ZMK_CUSTOM_SETTING_RANGE_INT32(ZMK_DEFAULT_LAYER_OS_DETECTION, \
++                                    CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX)
++#define OS_LAYER_CONSTRAINT \
++    ZMK_CUSTOM_SETTING_RANGE_INT32(ZMK_DEFAULT_LAYER_UNSET, \
++                                    CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX)
++#else
++#define ENDPOINT_LAYER_CONSTRAINT ZMK_CUSTOM_SETTING_NO_CONSTRAINT
++#define OS_LAYER_CONSTRAINT ZMK_CUSTOM_SETTING_NO_CONSTRAINT
++#endif
+@@ -75 +91 @@
+-                                ZMK_CUSTOM_SETTING_NO_CONSTRAINT);
++                                ENDPOINT_LAYER_CONSTRAINT);
+@@ -88 +104 @@
+-                                ZMK_CUSTOM_SETTING_NO_CONSTRAINT);
++                                OS_LAYER_CONSTRAINT);
+@@ -136 +152,2 @@
+-    return value >= 0 && value < ZMK_KEYMAP_LAYERS_LEN;
++    return value >= CONFIG_ZMK_DEFAULT_LAYER_MIN_INDEX &&
++           value <= CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX && value < ZMK_KEYMAP_LAYERS_LEN;
+@@ -206 +223 @@
+-    for (int i = CONFIG_ZMK_DEFAULT_LAYER_MIN_INDEX; i <= CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX; i++) {
++    for (int i = 0; i < ZMK_KEYMAP_LAYERS_LEN; i++) {
+@@ -241,0 +259,8 @@
++    }
++
++    /* Old persisted values can predate the new range constraint. */
++    if (resolved < CONFIG_ZMK_DEFAULT_LAYER_MIN_INDEX ||
++        resolved > CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX || resolved >= ZMK_KEYMAP_LAYERS_LEN) {
++        LOG_WRN("Default layer %d is outside the allowed range; using %d", resolved,
++                CONFIG_ZMK_DEFAULT_LAYER_MIN_INDEX);
++        resolved = CONFIG_ZMK_DEFAULT_LAYER_MIN_INDEX;

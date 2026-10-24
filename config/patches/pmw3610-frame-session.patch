@@ -1,0 +1,109 @@
+--- a/pmw3610_request_exec.c
++++ b/pmw3610_request_exec.c
+@@ -7,0 +8 @@
++#include <zephyr/sys/atomic.h>
+@@ -31,0 +33,3 @@
++#if PMW3610_IS_SPLIT_PERIPHERAL
++extern int nano35_pmw3610_relay_notify(const cormoran_pmw3610_Notification *notification);
++#endif
+@@ -340,2 +344 @@
+-    pmw3610_relay_notify(&frame_stream_notification);
+-    ret = 0;
++    ret = nano35_pmw3610_relay_notify(&frame_stream_notification);
+@@ -357,25 +360,8 @@
+-/* Streaming state, guarded implicitly by running only on ZMK's dedicated
+- * low-priority workqueue (frame_stream_work -- see zmk/workqueue.h; kept off
+- * the system workqueue so a capture loop cannot block unrelated system
+- * workqueue consumers system-wide) and being set from the RPC/relay-executor
+- * thread (which ZMK serializes one-request-at-a-time) -- no separate lock
+- * needed since the only cross-thread fields are the bools
+- * `frame_stream_active`/`frame_stream_session_active`, each only ever
+- * read-modify-written as a whole, and `frame_stream_active` is the sole
+- * field the RPC thread writes after the session starts (mirrors the
+- * pre-Phase-G synchronization argument).
+- *
+- * `frame_stream_active`: desired state (should the loop keep going).
+- * `frame_stream_session_active`: whether pmw3610_frame_capture_begin() has
+- * succeeded and pmw3610_frame_capture_end() has not yet run for it -- set by
+- * handle_set_frame_stream_request() right after a successful begin() (RPC
+- * thread), cleared by frame_stream_work_handler() itself (lowprio queue)
+- * once it calls end(). Whenever frame_stream_active is true there is always
+- * exactly one instance of frame_stream_work scheduled-or-running (the enable
+- * path schedules it once; the handler keeps self-rescheduling with
+- * K_NO_WAIT while active), so flipping frame_stream_active to false from
+- * any thread (SetFrameStream(false), the Studio lock listener, or the split
+- * disconnect listener) is enough to guarantee frame_stream_work_handler
+- * observes it on its very next run and ends the session there -- no
+- * separate "stop" work item is needed. */
+-static bool frame_stream_active;
++/* Session parameters are published before the atomic enabled flag. The
++ * low-priority work item owns frame capture and recovery; host/session events
++ * only clear the flag, so stopping never performs SPI on an event thread. */
++/* Existing DYA clients have no heartbeat. Bound an uninterrupted session
++ * even when the browser crashes while the dongle/split link stays powered. */
++#define NANO35_FRAME_STREAM_MAX_MS 60000
++static int64_t nano35_frame_stream_deadline;
++static atomic_t nano35_frame_stream_enabled;
+@@ -382,0 +369,5 @@
++
++/* Also called by the dongle's host-session cleanup for a local sensor. */
++void nano35_pmw3610_stop_stream(void) {
++    atomic_clear(&nano35_frame_stream_enabled);
++}
+@@ -418 +409,5 @@
+-    if (!frame_stream_active) {
++    if (atomic_get(&nano35_frame_stream_enabled) && k_uptime_get() >= nano35_frame_stream_deadline) {
++        LOG_INF("Frame stream: 60-second session limit reached");
++        atomic_clear(&nano35_frame_stream_enabled);
++    }
++    if (!atomic_get(&nano35_frame_stream_enabled)) {
+@@ -425 +420 @@
+-         * only sets frame_stream_active after a successful begin(). Stop
++         * only enables streaming after a successful begin(). Stop
+@@ -428 +423 @@
+-        frame_stream_active = false;
++        atomic_clear(&nano35_frame_stream_enabled);
+@@ -440 +435 @@
+-        frame_stream_active = false;
++        atomic_clear(&nano35_frame_stream_enabled);
+@@ -459,0 +455,4 @@
++        atomic_clear(&nano35_frame_stream_enabled);
++    } else if (!atomic_get(&nano35_frame_stream_enabled) ||
++               k_uptime_get() >= nano35_frame_stream_deadline) {
++        atomic_clear(&nano35_frame_stream_enabled);
+@@ -482 +481 @@
+-                if (notify_err != -ENOMEM) {
++                if (notify_err != -ENOMEM && notify_err != -ENOSPC) {
+@@ -488,0 +488 @@
++                atomic_clear(&nano35_frame_stream_enabled);
+@@ -499 +499 @@
+-    if (frame_stream_active) {
++    if (atomic_get(&nano35_frame_stream_enabled)) {
+@@ -514 +514 @@
+-        if (!frame_stream_active) {
++        if (!atomic_get(&nano35_frame_stream_enabled)) {
+@@ -530,0 +531 @@
++            nano35_frame_stream_deadline = k_uptime_get() + NANO35_FRAME_STREAM_MAX_MS;
+@@ -539,2 +540,2 @@
+-        bool already_active = frame_stream_active;
+-        frame_stream_active = true;
++        bool already_active = atomic_get(&nano35_frame_stream_enabled);
++        atomic_set(&nano35_frame_stream_enabled, 1);
+@@ -546 +547 @@
+-        frame_stream_active = false;
++        atomic_clear(&nano35_frame_stream_enabled);
+@@ -551 +552 @@
+-    result.streaming = frame_stream_active;
++    result.streaming = atomic_get(&nano35_frame_stream_enabled);
+@@ -566 +567 @@
+- * frame_stream_active is true) and calls pmw3610_frame_capture_end() there,
++ * streaming is enabled) and calls pmw3610_frame_capture_end() there,
+@@ -575 +576 @@
+-        frame_stream_active = false;
++        atomic_clear(&nano35_frame_stream_enabled);
+@@ -600 +601 @@
+-        frame_stream_active = false;
++        atomic_clear(&nano35_frame_stream_enabled);
+@@ -612 +613 @@
+-    if (frame_stream_active) {
++    if (atomic_get(&nano35_frame_stream_enabled)) {

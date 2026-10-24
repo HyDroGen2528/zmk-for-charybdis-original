@@ -2,7 +2,103 @@
 +++ b/pmw3610_relay.c
 @@ -42,0 +43 @@
 +#include <nano35/relay.h>
-@@ -389 +390,10 @@
+@@ -94,0 +96 @@
++#include <nano35/session.h>
+@@ -260,15 +262,3 @@
+-/* Single static buffer/work item: the relay bridge already assumes one
+- * in-flight relayed request at a time (matches the single-buffer/mutex
+- * pattern used for notifications elsewhere in this file) -- central awaits
+- * a DeferredResponse before a Studio client can issue another relayed call. */
+-static uint8_t relay_request_work_payload[PMW3610_RELAY_REQUEST_PAYLOAD_MAX_SIZE];
+-static size_t relay_request_work_payload_size;
+-
+-static void relay_request_work_handler(struct k_work *work) {
+-    ARG_UNUSED(work);
+-
+-    cormoran_pmw3610_RelayResponse relay_resp;
+-    if (pmw3610_relay_exec_request(relay_request_work_payload, relay_request_work_payload_size,
+-                                   &relay_resp) < 0) {
+-        return;
+-    }
++/* Copy complete requests before returning to the transport. Process one per
++ * work cycle so capture operations cannot starve settings/watchdog work. */
++K_MSGQ_DEFINE(nano35_pmw_requests, sizeof(struct zmk_pmw3610_relay_request), 4, 4);
+@@ -275,0 +266 @@
++static void send_pmw_relay_response(const cormoran_pmw3610_RelayResponse *relay_resp) {
+@@ -278 +269 @@
+-    if (!pb_encode(&ostream, cormoran_pmw3610_RelayResponse_fields, &relay_resp)) {
++    if (!pb_encode(&ostream, cormoran_pmw3610_RelayResponse_fields, relay_resp)) {
+@@ -284 +275,18 @@
+-    raise_zmk_pmw3610_relay_response(resp_event);
++    int err = raise_zmk_pmw3610_relay_response(resp_event);
++    if (err < 0) {
++        LOG_WRN("PMW3610 relay response send failed: %d", err);
++    }
++}
++
++static void relay_request_work_handler(struct k_work *work) {
++    struct zmk_pmw3610_relay_request request;
++    if (k_msgq_get(&nano35_pmw_requests, &request, K_NO_WAIT) != 0) {
++        return;
++    }
++    cormoran_pmw3610_RelayResponse response;
++    if (pmw3610_relay_exec_request(request.payload, request.size, &response) == 0) {
++        send_pmw_relay_response(&response);
++    }
++    if (k_msgq_num_used_get(&nano35_pmw_requests) > 0) {
++        k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), work);
++    }
+@@ -288,0 +297,17 @@
++/* A saturated queue must reject a request, never execute a different request
++ * under its ID. This path decodes the ID only; no device operation is run. */
++static void reject_pmw_relay_request(const struct zmk_pmw3610_relay_request *request) {
++    cormoran_pmw3610_RelayRequest decoded = cormoran_pmw3610_RelayRequest_init_zero;
++    pb_istream_t stream = pb_istream_from_buffer(request->payload, request->size);
++    if (!pb_decode(&stream, cormoran_pmw3610_RelayRequest_fields, &decoded)) {
++        return;
++    }
++    cormoran_pmw3610_RelayResponse response = cormoran_pmw3610_RelayResponse_init_zero;
++    response.request_id = decoded.request_id;
++    response.has_response = true;
++    response.response.which_response_type = cormoran_pmw3610_Response_error_tag;
++    snprintf(response.response.response_type.error.message,
++             sizeof(response.response.response_type.error.message), "PMW3610 relay busy; retry");
++    send_pmw_relay_response(&response);
++}
++
+@@ -295,5 +320,10 @@
+-    size_t size = MIN(ev->size, sizeof(relay_request_work_payload));
+-    memcpy(relay_request_work_payload, ev->payload, size);
+-    relay_request_work_payload_size = size;
+-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &relay_request_work);
+-    return 0;
++    if (ev->size > sizeof(ev->payload)) {
++        return -EMSGSIZE;
++    }
++    if (k_msgq_put(&nano35_pmw_requests, ev, K_NO_WAIT) != 0) {
++        LOG_WRN("PMW3610 relay request queue full");
++        reject_pmw_relay_request(ev);
++        return ZMK_EV_EVENT_HANDLED;
++    }
++    return k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &relay_request_work) < 0
++               ? -EIO : ZMK_EV_EVENT_BUBBLE;
+@@ -305 +335 @@
+-void pmw3610_relay_notify(const cormoran_pmw3610_Notification *notification) {
++int nano35_pmw3610_relay_notify(const cormoran_pmw3610_Notification *notification) {
+@@ -310 +340 @@
+-        return;
++        return -EMSGSIZE;
+@@ -314 +344,8 @@
+-    raise_zmk_pmw3610_relay_notification(event);
++    return raise_zmk_pmw3610_relay_notification(event);
++}
++
++void pmw3610_relay_notify(const cormoran_pmw3610_Notification *notification) {
++    int err = nano35_pmw3610_relay_notify(notification);
++    if (err < 0) {
++        LOG_WRN("PMW3610 relay notification send failed: %d", err);
++    }
+@@ -389 +426,10 @@
 -    raise_zmk_pmw3610_relay_request(event);
 +    uint32_t target = pmw3610_request_get_source(req);
 +    if (target == PMW3610_SOURCE_ALL &&
@@ -14,6 +110,106 @@
 +        LOG_WRN("PMW3610 relay target unavailable: %d", err);
 +        return 0;
 +    }
-@@ -395 +405 @@
+@@ -395 +441 @@
 -    ARG_UNUSED(source); /* Transport broadcasts to every peripheral -- see file doc comment. */
 +    ARG_UNUSED(source); /* Destination is read from the encoded request below. */
+@@ -400 +446 @@
+-        snprintf(err.message, sizeof(err.message), "failed to encode relay request");
++        snprintf(err.message, sizeof(err.message), "failed to send PMW3610 relay request");
+@@ -443,6 +489 @@
+-static uint8_t relay_response_work_source;
+-static uint8_t relay_response_work_payload[PMW3610_RELAY_RESPONSE_PAYLOAD_MAX_SIZE];
+-static size_t relay_response_work_payload_size;
+-
+-static void relay_response_work_handler(struct k_work *work) {
+-    ARG_UNUSED(work);
++K_MSGQ_DEFINE(nano35_pmw_responses, sizeof(struct zmk_pmw3610_relay_response), 8, 4);
+@@ -449,0 +491 @@
++static void process_pmw_relay_response(const struct zmk_pmw3610_relay_response *response) {
+@@ -452 +494 @@
+-        pb_istream_from_buffer(relay_response_work_payload, relay_response_work_payload_size);
++        pb_istream_from_buffer(response->payload, response->size);
+@@ -456,0 +499,7 @@
++    if (relay_resp.has_response) {
++        bool stream_result = relay_resp.response.which_response_type ==
++                             cormoran_pmw3610_Response_set_frame_stream_tag;
++        nano35_frame_session_result(
++            response->source, relay_resp.request_id, stream_result,
++            stream_result && relay_resp.response.response_type.set_frame_stream.streaming);
++    }
+@@ -470 +519 @@
+-    pr->source = relay_response_work_source;
++    pr->source = response->source;
+@@ -484,0 +534,10 @@
++static void relay_response_work_handler(struct k_work *work) {
++    struct zmk_pmw3610_relay_response response;
++    if (k_msgq_get(&nano35_pmw_responses, &response, K_NO_WAIT) == 0) {
++        process_pmw_relay_response(&response);
++    }
++    if (k_msgq_num_used_get(&nano35_pmw_responses) > 0) {
++        k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), work);
++    }
++}
++
+@@ -493,6 +552,9 @@
+-    size_t size = MIN(ev->size, sizeof(relay_response_work_payload));
+-    relay_response_work_source = ev->source;
+-    memcpy(relay_response_work_payload, ev->payload, size);
+-    relay_response_work_payload_size = size;
+-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &relay_response_work);
+-    return 0;
++    if (ev->size > sizeof(ev->payload)) {
++        return -EMSGSIZE;
++    }
++    if (k_msgq_put(&nano35_pmw_responses, ev, K_NO_WAIT) != 0) {
++        LOG_ERR("PMW3610 relay response queue full; request must be retried");
++        return -ENOSPC;
++    }
++    return k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &relay_response_work) < 0
++               ? -EIO : ZMK_EV_EVENT_BUBBLE;
+@@ -507,3 +569,2 @@
+-static uint8_t relay_notification_work_source;
+-static uint8_t relay_notification_work_payload[PMW3610_RELAY_NOTIFICATION_PAYLOAD_MAX_SIZE];
+-static size_t relay_notification_work_payload_size;
++/* More than two complete 484-pixel frames at the upstream chunk size. */
++K_MSGQ_DEFINE(nano35_pmw_notifications, sizeof(struct zmk_pmw3610_relay_notification), 16, 4);
+@@ -516,3 +577,2 @@
+-static void relay_notification_work_handler(struct k_work *work) {
+-    ARG_UNUSED(work);
+-
++static void process_pmw_relay_notification(
++    const struct zmk_pmw3610_relay_notification *notification) {
+@@ -522,2 +582 @@
+-    pb_istream_t istream = pb_istream_from_buffer(relay_notification_work_payload,
+-                                                  relay_notification_work_payload_size);
++    pb_istream_t istream = pb_istream_from_buffer(notification->payload, notification->size);
+@@ -533 +592 @@
+-            relay_notification_work_source;
++            notification->source;
+@@ -543,0 +603,10 @@
++static void relay_notification_work_handler(struct k_work *work) {
++    struct zmk_pmw3610_relay_notification notification;
++    if (k_msgq_get(&nano35_pmw_notifications, &notification, K_NO_WAIT) == 0) {
++        process_pmw_relay_notification(&notification);
++    }
++    if (k_msgq_num_used_get(&nano35_pmw_notifications) > 0) {
++        k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), work);
++    }
++}
++
+@@ -552,6 +621,9 @@
+-    size_t size = MIN(ev->size, sizeof(relay_notification_work_payload));
+-    relay_notification_work_source = ev->source;
+-    memcpy(relay_notification_work_payload, ev->payload, size);
+-    relay_notification_work_payload_size = size;
+-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &relay_notification_work);
+-    return 0;
++    if (ev->size > sizeof(ev->payload)) {
++        return -EMSGSIZE;
++    }
++    if (k_msgq_put(&nano35_pmw_notifications, ev, K_NO_WAIT) != 0) {
++        LOG_ERR("PMW3610 frame notification queue full; frame incomplete");
++        return -ENOSPC;
++    }
++    return k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &relay_notification_work) < 0
++               ? -EIO : ZMK_EV_EVENT_BUBBLE;

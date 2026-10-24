@@ -1,0 +1,7 @@
+--- a/pmw3610_handler.c
++++ b/pmw3610_handler.c
+@@ -9,0 +10 @@
++#include <nano35/session.h>
+@@ -98 +99 @@
+-        pmw3610_relay_dispatch_request(source, &req, resp);
++        nano35_frame_session_dispatch(source, &req, resp);

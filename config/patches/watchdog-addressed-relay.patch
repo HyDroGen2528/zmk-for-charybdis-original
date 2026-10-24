@@ -2,7 +2,63 @@
 +++ b/watchdog_relay.c
 @@ -59,0 +60 @@
 +#include <nano35/relay.h>
-@@ -423 +424,19 @@
+@@ -286,2 +287 @@
+-    raise_zmk_watchdog_relay_response(resp_event);
+-    return 0;
++    return raise_zmk_watchdog_relay_response(resp_event);
+@@ -314 +314 @@
+-static struct zmk_watchdog_relay_request watchdog_relay_pending_request;
++K_MSGQ_DEFINE(nano35_watchdog_requests, sizeof(struct zmk_watchdog_relay_request), 4, 4);
+@@ -316 +316 @@
+-static void watchdog_relay_process_work_handler(struct k_work *work) {
++static void watchdog_relay_process_one(const struct zmk_watchdog_relay_request *request) {
+@@ -319,2 +319 @@
+-    int ret = watchdog_relay_exec_request(watchdog_relay_pending_request.payload,
+-                                           watchdog_relay_pending_request.size, &request_id, &resp);
++    int ret = watchdog_relay_exec_request(request->payload, request->size, &request_id, &resp);
+@@ -338,0 +338,10 @@
++static void watchdog_relay_process_work_handler(struct k_work *work) {
++    struct zmk_watchdog_relay_request request;
++    if (k_msgq_get(&nano35_watchdog_requests, &request, K_NO_WAIT) == 0) {
++        watchdog_relay_process_one(&request);
++    }
++    if (k_msgq_num_used_get(&nano35_watchdog_requests) > 0) {
++        k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), work);
++    }
++}
++
+@@ -340,0 +350,16 @@
++static void reject_watchdog_relay_request(const struct zmk_watchdog_relay_request *request) {
++    cormoran_watchdog_RelayRequest decoded = cormoran_watchdog_RelayRequest_init_zero;
++    pb_istream_t stream = pb_istream_from_buffer(request->payload, request->size);
++    if (!pb_decode(&stream, cormoran_watchdog_RelayRequest_fields, &decoded)) {
++        return;
++    }
++    cormoran_watchdog_RelayResponse response = cormoran_watchdog_RelayResponse_init_zero;
++    response.request_id = decoded.request_id;
++    response.which_relay_response_type = cormoran_watchdog_RelayResponse_response_tag;
++    cormoran_watchdog_RelayNonListResponse *error = &response.relay_response_type.response;
++    error->which_relay_non_list_response_type = cormoran_watchdog_RelayNonListResponse_error_tag;
++    snprintf(error->relay_non_list_response_type.error.message,
++             sizeof(error->relay_non_list_response_type.error.message), "Watchdog relay busy; retry");
++    raise_relay_response(&response);
++}
++
+@@ -347,3 +372,10 @@
+-    watchdog_relay_pending_request = *ev;
+-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &watchdog_relay_process_work);
+-    return 0;
++    if (ev->size > sizeof(ev->payload)) {
++        return -EMSGSIZE;
++    }
++    if (k_msgq_put(&nano35_watchdog_requests, ev, K_NO_WAIT) != 0) {
++        LOG_WRN("Watchdog relay request queue full");
++        reject_watchdog_relay_request(ev);
++        return ZMK_EV_EVENT_HANDLED;
++    }
++    return k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &watchdog_relay_process_work) < 0
++               ? -EIO : ZMK_EV_EVENT_BUBBLE;
+@@ -423 +455,19 @@
 -    raise_zmk_watchdog_relay_request(event);
 +    uint32_t source;
 +    switch (req->which_request_type) {
@@ -23,35 +79,153 @@
 +        LOG_WRN("Watchdog relay target unavailable: %d", err);
 +        return 0;
 +    }
-@@ -584,3 +603,6 @@
--static struct zmk_watchdog_relay_response watchdog_relay_pending_response;
--
--static void watchdog_relay_response_process_work_handler(struct k_work *work) {
-+/* Retain complete incident pages even when several BLE chunks arrive
-+ * before the low-priority worker is scheduled. */
-+K_MSGQ_DEFINE(nano35_watchdog_responses, sizeof(struct zmk_watchdog_relay_response), 24, 4);
+@@ -432 +482 @@
+-        snprintf(err.message, sizeof(err.message), "failed to encode relay request");
++        snprintf(err.message, sizeof(err.message), "failed to send watchdog relay request");
+@@ -500,9 +550,2 @@
+-/* Accumulates in-flight ListIncidents incident_chunk events by request_id
+- * (DESIGN.md SS7.1). Only one relayed ListIncidents is realistically ever
+- * in flight at a time in this module's usage (the web UI awaits each
+- * PeripheralResponse before issuing the next request), so a single slot is
+- * enough -- a chunk for a different request_id than the one currently being
+- * accumulated simply restarts accumulation for the new request_id (treated
+- * as "the previous one will never complete", which is already true of any
+- * relay request whose peripheral disconencts mid-flight, see this file's
+- * top doc comment on timeouts). */
++/* Key simultaneous pages by BOTH peripheral and request ID. A failed or
++ * disconnected request expires instead of taking a slot indefinitely. */
+@@ -515,0 +559 @@
++    int64_t updated_at;
+@@ -529 +573,9 @@
+-static struct incident_chunk_accumulator chunk_accumulator;
++static struct incident_chunk_accumulator chunk_accumulators[4];
 +
++static void report_watchdog_relay_error(uint32_t source, uint32_t request_id, const char *message) {
++    cormoran_watchdog_Response response = cormoran_watchdog_Response_init_zero;
++    response.which_response_type = cormoran_watchdog_Response_error_tag;
++    snprintf(response.response_type.error.message, sizeof(response.response_type.error.message),
++             "%s", message);
++    raise_peripheral_response_notification(source, request_id, &response);
++}
+@@ -533,2 +585,23 @@
+-    if (!chunk_accumulator.active || chunk_accumulator.request_id != request_id) {
+-        chunk_accumulator = (struct incident_chunk_accumulator){
++    int64_t now = k_uptime_get();
++    struct incident_chunk_accumulator *accumulator = NULL;
++    struct incident_chunk_accumulator *free_slot = NULL;
++    for (size_t i = 0; i < ARRAY_SIZE(chunk_accumulators); i++) {
++        struct incident_chunk_accumulator *slot = &chunk_accumulators[i];
++        if (slot->active && now - slot->updated_at > 10000) {
++            report_watchdog_relay_error(slot->source, slot->request_id,
++                                       "Watchdog incident page timed out; retry");
++            slot->active = false;
++        }
++        if (slot->active && slot->source == source && slot->request_id == request_id) {
++            accumulator = slot;
++        } else if (!slot->active && !free_slot) {
++            free_slot = slot;
++        }
++    }
++    if (!accumulator) {
++        if (!free_slot) {
++            report_watchdog_relay_error(source, request_id, "Watchdog incident pages busy; retry");
++            return;
++        }
++        accumulator = free_slot;
++        *accumulator = (struct incident_chunk_accumulator){
+@@ -538 +610,0 @@
+-            .incidents_count = 0,
+@@ -540,0 +613 @@
++    accumulator->updated_at = now;
+@@ -542,2 +615,23 @@
+-    chunk_accumulator.total = chunk->total;
+-    chunk_accumulator.start_index = chunk->start_index;
++    if (accumulator->incidents_count > 0 &&
++        (accumulator->total != chunk->total || accumulator->start_index != chunk->start_index)) {
++        report_watchdog_relay_error(source, request_id, "Inconsistent watchdog incident page; retry");
++        accumulator->active = false;
++        return;
++    }
++    accumulator->total = chunk->total;
++    accumulator->start_index = chunk->start_index;
++    if (chunk->has_incident) {
++        for (size_t i = 0; i < accumulator->incidents_count; i++) {
++            if (accumulator->incidents[i].id == chunk->incident.id) {
++                report_watchdog_relay_error(source, request_id,
++                                           "Duplicate watchdog incident chunk; retry");
++                accumulator->active = false;
++                return;
++            }
++        }
++        if (accumulator->incidents_count == ARRAY_SIZE(accumulator->incidents)) {
++            report_watchdog_relay_error(source, request_id, "Oversized watchdog incident page; retry");
++            accumulator->active = false;
++            return;
++        }
++    }
+@@ -546 +640 @@
+-        chunk_accumulator.incidents_count < ARRAY_SIZE(chunk_accumulator.incidents)) {
++        accumulator->incidents_count < ARRAY_SIZE(accumulator->incidents)) {
+@@ -554 +648 @@
+-        chunk_accumulator.incidents[chunk_accumulator.incidents_count++] = incident;
++        accumulator->incidents[accumulator->incidents_count++] = incident;
+@@ -560,0 +655,7 @@
++    uint32_t expected = chunk->total > chunk->start_index ? chunk->total - chunk->start_index : 0;
++    expected = MIN(expected, WATCHDOG_RELAY_INCIDENT_ACCUMULATOR_MAX_COUNT);
++    if (accumulator->incidents_count != expected) {
++        report_watchdog_relay_error(source, request_id, "Incomplete watchdog incident page; retry");
++        accumulator->active = false;
++        return;
++    }
+@@ -565,5 +666,5 @@
+-    page->total = chunk_accumulator.total;
+-    page->start_index = chunk_accumulator.start_index;
+-    page->incidents_count = chunk_accumulator.incidents_count;
+-    for (size_t i = 0; i < chunk_accumulator.incidents_count; i++) {
+-        page->incidents[i] = chunk_accumulator.incidents[i];
++    page->total = accumulator->total;
++    page->start_index = accumulator->start_index;
++    page->incidents_count = accumulator->incidents_count;
++    for (size_t i = 0; i < accumulator->incidents_count; i++) {
++        page->incidents[i] = accumulator->incidents[i];
+@@ -574 +675 @@
+-    chunk_accumulator.active = false;
++    accumulator->active = false;
+@@ -584 +685 @@
+-static struct zmk_watchdog_relay_response watchdog_relay_pending_response;
++K_MSGQ_DEFINE(nano35_watchdog_responses, sizeof(struct zmk_watchdog_relay_response), 24, 4);
+@@ -586 +687,2 @@
+-static void watchdog_relay_response_process_work_handler(struct k_work *work) {
 +static void watchdog_relay_response_process_one(
 +    const struct zmk_watchdog_relay_response *response) {
-@@ -588,2 +610,2 @@
+@@ -588,2 +690 @@
 -    pb_istream_t istream = pb_istream_from_buffer(watchdog_relay_pending_response.payload,
 -                                                   watchdog_relay_pending_response.size);
-+    pb_istream_t istream = pb_istream_from_buffer(response->payload,
-+                                                   response->size);
-@@ -595 +617 @@
++    pb_istream_t istream = pb_istream_from_buffer(response->payload, response->size);
+@@ -595 +696 @@
 -    uint32_t source = watchdog_relay_pending_response.source;
 +    uint32_t source = response->source;
-@@ -638,0 +661,7 @@
+@@ -638,0 +740,10 @@
 +static void watchdog_relay_response_process_work_handler(struct k_work *work) {
 +    struct zmk_watchdog_relay_response response;
-+    while (k_msgq_get(&nano35_watchdog_responses, &response, K_NO_WAIT) == 0) {
++    if (k_msgq_get(&nano35_watchdog_responses, &response, K_NO_WAIT) == 0) {
 +        watchdog_relay_response_process_one(&response);
++    }
++    if (k_msgq_num_used_get(&nano35_watchdog_responses) > 0) {
++        k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), work);
 +    }
 +}
 +
-@@ -647 +676,4 @@
+@@ -647,3 +758,9 @@
 -    watchdog_relay_pending_response = *ev;
-+    if (k_msgq_put(&nano35_watchdog_responses, ev, K_NO_WAIT) < 0) {
-+        LOG_ERR("Watchdog response queue full");
-+        return ZMK_EV_EVENT_BUBBLE;
+-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &watchdog_relay_response_process_work);
+-    return 0;
++    if (ev->size > sizeof(ev->payload)) {
++        return -EMSGSIZE;
 +    }
++    if (k_msgq_put(&nano35_watchdog_responses, ev, K_NO_WAIT) != 0) {
++        LOG_ERR("Watchdog response queue full; incomplete pages will be rejected");
++        return -ENOSPC;
++    }
++    return k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &watchdog_relay_response_process_work) < 0
++               ? -EIO : ZMK_EV_EVENT_BUBBLE;

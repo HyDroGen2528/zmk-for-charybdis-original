@@ -1,35 +1,83 @@
 --- a/pmw3610.c
 +++ b/pmw3610.c
-@@ -142,0 +143,25 @@
+@@ -12,0 +13 @@
++#include <zephyr/sys/atomic.h>
+@@ -143 +144,68 @@
+-static int pmw3610_read(const struct device *dev, uint8_t addr, uint8_t *value, uint8_t len) {
++/* Per-device delayed report state without changing the pinned driver's ABI. */
++struct nano35_report_state {
++    const struct device *dev;
++    struct k_work_delayable work;
++    atomic_t motion_pending;
++    atomic_t activity_pending;
++};
++
++static struct nano35_report_state nano35_reports[DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT)];
++static void nano35_report_work(struct k_work *work);
++
++static struct nano35_report_state *nano35_report_state(const struct device *dev) {
++    for (size_t i = 0; i < ARRAY_SIZE(nano35_reports); i++) {
++        if (nano35_reports[i].dev == dev) {
++            return &nano35_reports[i];
++        }
++    }
++    return NULL;
++}
++
++static void nano35_schedule_report(const struct device *dev, int64_t delay_ms) {
++    struct nano35_report_state *state = nano35_report_state(dev);
++    if (state) {
++        k_work_reschedule(&state->work, K_MSEC(MAX(delay_ms, 1)));
++    }
++}
++
++/* Caller owns data->lock. Preserve unsent counts, including queue-full and
++ * clamped reports, and flush the final sample even when motion has stopped. */
++static void nano35_flush_report_locked(const struct device *dev) {
++    struct pixart_data *data = dev->data;
++    const struct pixart_config *config = dev->config;
++    if (!data->dx && !data->dy) {
++        return;
++    }
++    int64_t now = k_uptime_get();
++    uint32_t interval = data->runtime.report_interval_min_ms;
++    int64_t wait = data->last_rpt_time + interval - now;
++    if (wait > 0) {
++        nano35_schedule_report(dev, wait);
++        return;
++    }
++    int16_t x = CLAMP(data->dx, INT16_MIN, INT16_MAX);
++    int16_t y = CLAMP(data->dy, INT16_MIN, INT16_MAX);
++    bool sent = false;
++    if (x && input_report(dev, config->evt_type, config->x_input_code, x, !y, K_NO_WAIT) == 0) {
++        data->dx -= x;
++        sent = true;
++    }
++    if (y && input_report(dev, config->evt_type, config->y_input_code, y, true, K_NO_WAIT) == 0) {
++        data->dy -= y;
++        sent = true;
++    }
++    if (sent) {
++        data->last_rpt_time = now;
++    }
++    if (data->dx || data->dy) {
++        nano35_schedule_report(dev, MAX(interval, 1));
++    }
++}
++
 +/* Nano35 shares MOSI and MISO. Keep address and receive phases separate,
 + * with GPIO chip select held across them, as in the original working driver.
 + * The nRF SPIM driver does not implement SPI_HALF_DUPLEX. */
 +static int nano35_read_transaction(const struct device *dev, uint8_t addr,
 +                                   const struct spi_buf_set *rx) {
-+    const struct pixart_config *cfg = dev->config;
++    struct pixart_data *data = dev->data;
++    k_mutex_lock(&data->lock, K_FOREVER);
+@@ -145 +213,3 @@
+-    const struct spi_buf tx_buf = {.buf = &addr, .len = sizeof(addr)};
 +    struct spi_config bus = cfg->spi.config;
 +    bus.cs.gpio.port = NULL;
 +    const struct spi_buf tx_buf = {.buf = &addr, .len = 1};
-+    const struct spi_buf_set tx = {.buffers = &tx_buf, .count = 1};
-+    int err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 1);
-+    if (err < 0) {
-+        return err;
-+    }
-+    k_busy_wait(1);
-+    err = spi_write(cfg->spi.bus, &bus, &tx);
-+    if (!err) {
-+        k_busy_wait(4);
-+        err = spi_read(cfg->spi.bus, &bus, rx);
-+    }
-+    int release_err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 0);
-+    k_busy_wait(1);
-+    return err ? err : release_err;
-+}
-+
-@@ -144,15 +169,3 @@
--    const struct pixart_config *cfg = dev->config;
--    const struct spi_buf tx_buf = {.buf = &addr, .len = sizeof(addr)};
--    const struct spi_buf_set tx = {.buffers = &tx_buf, .count = 1};
+@@ -147,12 +217,21 @@
 -    struct spi_buf rx_buf[] = {
 -        {
 -            .buf = NULL,
@@ -42,10 +90,28 @@
 -    };
 -    const struct spi_buf_set rx = {.buffers = rx_buf, .count = ARRAY_SIZE(rx_buf)};
 -    return spi_transceive_dt(&cfg->spi, &tx, &rx);
++    int err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 1);
++    if (err < 0) {
++        k_mutex_unlock(&data->lock);
++        return err;
++    }
++    k_busy_wait(1);
++    err = spi_write(cfg->spi.bus, &bus, &tx);
++    if (!err) {
++        k_busy_wait(4);
++        err = spi_read(cfg->spi.bus, &bus, rx);
++    }
++    int release_err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 0);
++    k_busy_wait(1);
++    k_mutex_unlock(&data->lock);
++    return err ? err : release_err;
++}
++
++static int pmw3610_read(const struct device *dev, uint8_t addr, uint8_t *value, uint8_t len) {
 +    struct spi_buf rx_buf = {.buf = value, .len = len};
 +    const struct spi_buf_set rx = {.buffers = &rx_buf, .count = 1};
 +    return nano35_read_transaction(dev, addr, &rx);
-@@ -187,8 +200 @@
+@@ -187,8 +266 @@
 -    const struct pixart_config *cfg = dev->config;
 -    uint8_t addr = PMW3610_REG_MOTION_BURST;
 -    const struct spi_buf tx_buf = {.buf = &addr, .len = sizeof(addr)};
@@ -55,18 +121,21 @@
 -     * receive the frame in <=PMW3610_BURST_MAX_XFER segments. */
 -    struct spi_buf rx_buf[1 + PMW3610_BURST_MAX_SEGMENTS];
 +    struct spi_buf rx_buf[PMW3610_BURST_MAX_SEGMENTS];
-@@ -196,2 +201,0 @@
+@@ -196,2 +267,0 @@
 -    rx_buf[n++] = (struct spi_buf){.buf = NULL, .len = sizeof(addr)};
 -
-@@ -205,2 +208,0 @@
+@@ -205,2 +274,0 @@
 -        LOG_ERR("Frame capture (burst): %u px exceeds %u-segment budget", len,
 -                PMW3610_BURST_MAX_SEGMENTS);
-@@ -209 +210,0 @@
+@@ -209 +276,0 @@
 -
-@@ -211 +212 @@
+@@ -211 +278 @@
 -    return spi_transceive_dt(&cfg->spi, &tx, &rx);
 +    return nano35_read_transaction(dev, PMW3610_REG_MOTION_BURST, &rx);
-@@ -216,10 +217,15 @@
+@@ -214,0 +282,2 @@
++    struct pixart_data *data = dev->data;
++    k_mutex_lock(&data->lock, K_FOREVER);
+@@ -216,10 +285,17 @@
 -    uint8_t write_buf[] = {addr | SPI_WRITE_BIT, value};
 -    const struct spi_buf tx_buf = {
 -        .buf = write_buf,
@@ -84,6 +153,7 @@
 +    const struct spi_buf_set tx = {.buffers = &tx_buf, .count = 1};
 +    int err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 1);
 +    if (err < 0) {
++        k_mutex_unlock(&data->lock);
 +        return err;
 +    }
 +    k_busy_wait(1);
@@ -91,8 +161,32 @@
 +    k_busy_wait(10);
 +    int release_err = gpio_pin_set_dt(&cfg->spi.config.cs.gpio, 0);
 +    k_busy_wait(30);
++    k_mutex_unlock(&data->lock);
 +    return err ? err : release_err;
-@@ -381,26 +387,9 @@
+@@ -229,6 +305,7 @@
+-    pmw3610_write_reg(dev, PMW3610_REG_SPI_CLK_ON_REQ, PMW3610_SPI_CLOCK_CMD_ENABLE);
+-    k_sleep(K_USEC(T_CLOCK_ON_DELAY_US));
+-
+-    int err = pmw3610_write_reg(dev, reg, val);
+-    if (unlikely(err != 0)) {
+-        return err;
++    struct pixart_data *data = dev->data;
++    k_mutex_lock(&data->lock, K_FOREVER);
++    int err = pmw3610_write_reg(dev, PMW3610_REG_SPI_CLK_ON_REQ,
++                              PMW3610_SPI_CLOCK_CMD_ENABLE);
++    if (!err) {
++        k_sleep(K_USEC(T_CLOCK_ON_DELAY_US));
++        err = pmw3610_write_reg(dev, reg, val);
+@@ -236,3 +313,5 @@
+-
+-    pmw3610_write_reg(dev, PMW3610_REG_SPI_CLK_ON_REQ, PMW3610_SPI_CLOCK_CMD_DISABLE);
+-    return 0;
++    /* Release the sensor clock even when the target write failed. */
++    int release_err = pmw3610_write_reg(dev, PMW3610_REG_SPI_CLK_ON_REQ,
++                                      PMW3610_SPI_CLOCK_CMD_DISABLE);
++    k_mutex_unlock(&data->lock);
++    return err ? err : release_err;
+@@ -381,23 +460,4 @@
 -    int err = 0;
 -
 -    if (force_awake_runtime) {
@@ -116,28 +210,203 @@
 -            }
 -            LOG_INF("Set performance register (reg value 0x%x)", perf);
 -        }
--    }
--
--    return err;
 +    uint8_t value;
 +    int err = pmw3610_read_reg(dev, PMW3610_REG_PERFORMANCE, &value);
 +    if (err) {
 +        return err;
-+    }
+@@ -405,2 +465,4 @@
+-
+-    return err;
 +    /* Preserve Nano35's 250-Hz sensor mode / ~125-Hz software reporting.
 +     * Always clear forced-run bits when the Studio switch is turned off. */
 +    uint8_t perf = 0x0D | ((force_awake_runtime && enabled) ? 0xF0 : 0);
 +    return perf == value ? 0 : pmw3610_write(dev, PMW3610_REG_PERFORMANCE, perf);
-@@ -565 +554 @@
+@@ -485 +547,2 @@
+-        err = pmw3610_set_performance(dev, rt.force_awake, true);
++        err = pmw3610_set_performance(dev, rt.force_awake,
++                                      zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE);
+@@ -528 +591 @@
+-static void pmw3610_async_init(struct k_work *work) {
++static void pmw3610_async_init_locked(struct k_work *work) {
+@@ -558,0 +622 @@
++            nano35_schedule_report(dev, 1);
+@@ -565 +629,12 @@
 -static int pmw3610_report_data(const struct device *dev) {
-+static int pmw3610_report_data_locked(const struct device *dev) {
-@@ -680,0 +670,9 @@
++static void pmw3610_async_init(struct k_work *work) {
++    struct k_work_delayable *delayed = k_work_delayable_from_work(work);
++    struct pixart_data *data = CONTAINER_OF(delayed, struct pixart_data, init_work);
++    if (k_mutex_lock(&data->lock, K_NO_WAIT) != 0) {
++        k_work_reschedule(&data->init_work, K_MSEC(1));
++        return;
++    }
++    pmw3610_async_init_locked(work);
++    k_mutex_unlock(&data->lock);
 +}
 +
++static int pmw3610_report_data_locked(const struct device *dev) {
+@@ -588 +662,0 @@
+-    uint32_t report_interval_min_ms = rt.report_interval_min_ms;
+@@ -640,10 +714 @@
+-    if (report_interval_min_ms > 0) {
+-        // purge accumulated delta, if last sampled had not been reported on last report tick
+-        if (now - data->last_smp_time >= report_interval_min_ms) {
+-            data->dx = 0;
+-            data->dy = 0;
+-        }
+-        data->last_smp_time = now;
+-    }
+-
+-    // accumulate delta until report in next iteration
++    data->last_smp_time = now;
+@@ -651,0 +717 @@
++    nano35_flush_report_locked(dev);
+@@ -653,6 +719,2 @@
+-    if (report_interval_min_ms > 0) {
+-        // strict to report inerval
+-        if (now - data->last_rpt_time < report_interval_min_ms) {
+-            return 0;
+-        }
+-    }
++    return 0;
++}
+@@ -660,14 +722,22 @@
+-    // fetch report value
+-    int16_t rx = (int16_t)CLAMP(data->dx, INT16_MIN, INT16_MAX);
+-    int16_t ry = (int16_t)CLAMP(data->dy, INT16_MIN, INT16_MAX);
+-    bool have_x = rx != 0;
+-    bool have_y = ry != 0;
+-
+-    if (have_x || have_y) {
+-        if (report_interval_min_ms > 0) {
+-            data->last_rpt_time = now;
+-        }
+-        data->dx = 0;
+-        data->dy = 0;
+-        if (have_x) {
+-            input_report(dev, config->evt_type, config->x_input_code, rx, !have_y, K_NO_WAIT);
 +/* Serialize motion reads against Studio register/settings/frame operations. */
 +static int pmw3610_report_data(const struct device *dev) {
 +    struct pixart_data *data = dev->data;
-+    k_mutex_lock(&data->lock, K_FOREVER);
-+    int err = pmw3610_report_data_locked(dev);
++    struct nano35_report_state *state = nano35_report_state(dev);
++    if (k_mutex_lock(&data->lock, K_NO_WAIT) != 0) {
++        nano35_schedule_report(dev, 1);
++        return -EBUSY;
++    }
++    int err = 0;
++    if (data->ready && !data->capture_active) {
++        if (atomic_cas(&state->activity_pending, 1, 0)) {
++            err = pmw3610_set_performance(dev, data->runtime.force_awake,
++                                         zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE);
++        }
++        if (atomic_cas(&state->motion_pending, 1, 0)) {
++            err = pmw3610_report_data_locked(dev);
++            if (err) {
++                atomic_set(&state->motion_pending, 1);
++                nano35_schedule_report(dev, 8);
++            }
++        } else {
++            nano35_flush_report_locked(dev);
+@@ -675,2 +745,2 @@
+-        if (have_y) {
+-            input_report(dev, config->evt_type, config->y_input_code, ry, true, K_NO_WAIT);
++        if (!atomic_get(&state->motion_pending)) {
++            pmw3610_set_interrupt(dev, true);
+@@ -677,0 +748,3 @@
++    } else {
++        /* Capture recovery/async init re-enables IRQ when navigation is ready. */
++        atomic_clear(&state->motion_pending);
+@@ -678,0 +752,3 @@
 +    k_mutex_unlock(&data->lock);
 +    return err;
++}
+@@ -680 +756,4 @@
+-    return 0;
++static void nano35_report_work(struct k_work *work) {
++    struct k_work_delayable *delayed = k_work_delayable_from_work(work);
++    struct nano35_report_state *state = CONTAINER_OF(delayed, struct nano35_report_state, work);
++    pmw3610_report_data(state->dev);
+@@ -687,0 +767 @@
++    atomic_set(&nano35_report_state(dev)->motion_pending, 1);
+@@ -695 +774,0 @@
+-    pmw3610_set_interrupt(dev, true);
+@@ -731 +810 @@
+-static int pmw3610_resume(const struct device *dev) {
++static int pmw3610_resume_locked(const struct device *dev) {
+@@ -733 +811,0 @@
+-    const struct pixart_config *config = dev->config;
+@@ -750,0 +829,8 @@
++static int pmw3610_resume(const struct device *dev) {
++    struct pixart_data *data = dev->data;
++    k_mutex_lock(&data->lock, K_FOREVER);
++    int err = pmw3610_resume_locked(dev);
++    k_mutex_unlock(&data->lock);
++    return err;
++}
++
+@@ -762,0 +849,7 @@
++    for (size_t i = 0; i < ARRAY_SIZE(nano35_reports); i++) {
++        if (!nano35_reports[i].dev) {
++            nano35_reports[i].dev = dev;
++            k_work_init_delayable(&nano35_reports[i].work, nano35_report_work);
++            break;
++        }
++    }
+@@ -873,2 +966 @@
+-static int pmw3610_suspend(const struct device *dev) {
+-    const struct pixart_config *config = dev->config;
++static int pmw3610_suspend_locked(const struct device *dev) {
+@@ -897,0 +990,8 @@
++static int pmw3610_suspend(const struct device *dev) {
++    struct pixart_data *data = dev->data;
++    k_mutex_lock(&data->lock, K_FOREVER);
++    int err = pmw3610_suspend_locked(dev);
++    k_mutex_unlock(&data->lock);
++    return err;
++}
++
+@@ -954 +1054,4 @@
+-        if (!data->ready) {
++        struct nano35_report_state *state = nano35_report_state(dev);
++        if (k_mutex_lock(&data->lock, K_NO_WAIT) != 0) {
++            atomic_set(&state->activity_pending, 1);
++            nano35_schedule_report(dev, 1);
+@@ -957,2 +1060,3 @@
+-        k_mutex_lock(&data->lock, K_FOREVER);
+-        bool force_awake = data->runtime.force_awake;
++        if (data->ready && !data->capture_active) {
++            pmw3610_set_performance(dev, data->runtime.force_awake, enable);
++        }
+@@ -960 +1063,0 @@
+-        pmw3610_set_performance(dev, force_awake, enable);
+@@ -1007 +1110 @@
+-    if (!dev) {
++    if (!dev || !value) {
+@@ -1010 +1113,5 @@
+-    return pmw3610_read_reg(dev, addr, value);
++    struct pixart_data *data = dev->data;
++    k_mutex_lock(&data->lock, K_FOREVER);
++    int err = data->ready && !data->capture_active ? pmw3610_read_reg(dev, addr, value) : -EBUSY;
++    k_mutex_unlock(&data->lock);
++    return err;
+@@ -1019 +1126 @@
+-    int err = pmw3610_write(dev, addr, value);
++    int err = data->ready && !data->capture_active ? pmw3610_write(dev, addr, value) : -EBUSY;
+@@ -1246 +1353,2 @@
+-    int err = data->ready ? pmw3610_set_performance(dev, enabled, active) : 0;
++    int err = data->ready && !data->capture_active
++                  ? pmw3610_set_performance(dev, enabled, active) : 0;
+@@ -1407 +1515 @@
+-    if (!data->ready) {
++    if (!data->ready || data->capture_active) {
+@@ -1410,0 +1519 @@
++    nano35_flush_report_locked(dev);
+@@ -1412 +1520,0 @@
+-    k_mutex_unlock(&data->lock);
+@@ -1414,2 +1522 @@
+-    /* Disable the motion IRQ outside the lock (matches pmw3610_set_interrupt
+-     * usage elsewhere in this file, which does not require data->lock). */
++    /* Keep the whole force-run handshake serialized against Studio/activity. */
+@@ -1425 +1531,0 @@
+-        k_mutex_lock(&data->lock, K_FOREVER);
+@@ -1433 +1538,0 @@
+-    k_mutex_lock(&data->lock, K_FOREVER);

@@ -1,0 +1,57 @@
+--- a/custom_settings_handler.c
++++ b/custom_settings_handler.c
+@@ -32,0 +33 @@
++#include <nano35/relay.h>
+@@ -2329 +2330,2 @@
+-static bool should_relay_to_peripherals(const cormoran_zmk_custom_settings_Request *req) {
++/* Preserve the Studio destination before relay encoding normalizes its refs to local. */
++static uint32_t relay_request_target(const cormoran_zmk_custom_settings_Request *req) {
+@@ -2332 +2334 @@
+-        return source_targets_peripherals(scope_source(&req->request_type.list_settings.scope));
++        return scope_source(&req->request_type.list_settings.scope);
+@@ -2334 +2336 @@
+-        return source_targets_peripherals(scope_source(&req->request_type.save_settings.scope));
++        return scope_source(&req->request_type.save_settings.scope);
+@@ -2336 +2338 @@
+-        return source_targets_peripherals(scope_source(&req->request_type.discard_settings.scope));
++        return scope_source(&req->request_type.discard_settings.scope);
+@@ -2338 +2340 @@
+-        return source_targets_peripherals(scope_source(&req->request_type.reset_settings.scope));
++        return scope_source(&req->request_type.reset_settings.scope);
+@@ -2340 +2342 @@
+-        return source_targets_peripherals(ref_source(&req->request_type.write_setting.setting));
++        return ref_source(&req->request_type.write_setting.setting);
+@@ -2342 +2344 @@
+-        return source_targets_peripherals(ref_source(&req->request_type.push_back_array.setting));
++        return ref_source(&req->request_type.push_back_array.setting);
+@@ -2344 +2346 @@
+-        return source_targets_peripherals(ref_source(&req->request_type.pop_back_array.setting));
++        return ref_source(&req->request_type.pop_back_array.setting);
+@@ -2346 +2348 @@
+-        return false;
++        return ZMK_CUSTOM_SETTING_SOURCE_LOCAL;
+@@ -2349,0 +2352,4 @@
++static bool should_relay_to_peripherals(const cormoran_zmk_custom_settings_Request *req) {
++    return source_targets_peripherals(relay_request_target(req));
++}
++
+@@ -2614 +2620,2 @@
+-    return raise_zmk_custom_settings_relay_request(relay_request);
++    return nano35_relay_send(relay_request_target(req), "csr", &relay_request,
++                             sizeof(relay_request));
+@@ -2621,0 +2629 @@
++static uint32_t list_settings_relay_target;
+@@ -2632,0 +2641 @@
++    uint32_t target = list_settings_relay_target;
+@@ -2637 +2646 @@
+-    int ret = raise_zmk_custom_settings_relay_request(relay_request);
++    int ret = nano35_relay_send(target, "csr", &relay_request, sizeof(relay_request));
+@@ -2652 +2660,0 @@
+-    k_work_cancel_delayable(&list_settings_relay_work);
+@@ -2653,0 +2662,4 @@
++    if (list_settings_relay_active) {
++        k_mutex_unlock(&list_settings_relay_lock);
++        return -EBUSY;
++    }
+@@ -2654,0 +2667 @@
++    list_settings_relay_target = relay_request_target(req);

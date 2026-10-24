@@ -3,6 +3,11 @@ build:
   depends:
     - zmk-driver-pmw3610-with-custom-studio-rpc
     - zmk-feature-watchdog
+    - zmk-feature-custom-settings
+    - zmk-feature-zephyr-setting-expose
+    - zmk-module-settings-rpc
+    - zmk-feature-default-layer
+    - zmk-behavior-runtime-sensor-rotate
   cmake: .
   settings:
     dts_root: .

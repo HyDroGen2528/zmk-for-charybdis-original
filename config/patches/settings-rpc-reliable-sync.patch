@@ -1,0 +1,71 @@
+--- a/settings_rpc_handler.c
++++ b/settings_rpc_handler.c
+@@ -8,0 +9,3 @@
++#include <errno.h>
++#include <nano35/activity.h>
++#include <zmk/split/central.h>
+@@ -158 +161 @@
+-        return -ENOENT;
++        return;
+@@ -194,0 +198,2 @@
++    // Nanopb omits a submessage unless its presence flag is set.
++    result.has_settings = true;
+@@ -217,12 +222,5 @@
+-    bool success = true;
+-
+-    // Update idle timeout
+-    if (!zmk_activity_set_idle_ms(req->settings.idle_ms)) {
+-        LOG_ERR("Failed to set idle timeout to %d ms", req->settings.idle_ms);
+-        success = false;
+-    }
+-
+-    // Update sleep timeout
+-    if (!zmk_activity_set_sleep_ms(req->settings.sleep_ms)) {
+-        LOG_ERR("Failed to set sleep timeout to %d ms", req->settings.sleep_ms);
+-        success = false;
++    if (!req->has_settings) {
++        resp->which_response_type = zmk_settings_Response_error_tag;
++        snprintf(resp->response_type.error.message, sizeof(resp->response_type.error.message),
++                 "Activity settings are required");
++        return 0;
+@@ -231,13 +229,14 @@
+-    if (success) {
+-#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+-        // Raise event to propagate to peripherals
+-        struct zmk_activity_settings_changed event = {
+-            .idle_ms  = req->settings.idle_ms,
+-            .sleep_ms = req->settings.sleep_ms,
+-            .source   = ZMK_RELAY_EVENT_SOURCE_SELF,
+-        };
+-        raise_zmk_activity_settings_changed(event);
+-        LOG_DBG("Activity settings updated and event raised");
+-#else
+-        LOG_DBG("Activity settings updated (relay not enabled)");
+-#endif
++    int err = nano35_activity_sync_set(req->settings.idle_ms, req->settings.sleep_ms);
++    if (err < 0) {
++        resp->which_response_type = zmk_settings_Response_error_tag;
++        if (err == -ETIMEDOUT) {
++            snprintf(resp->response_type.error.message, sizeof(resp->response_type.error.message),
++                     "Saved locally; halves pending. Reconnect both, then read back.");
++        } else if (err == -ERANGE) {
++            snprintf(resp->response_type.error.message, sizeof(resp->response_type.error.message),
++                     "Timeouts must be between 0 and 2147483647 ms");
++        } else {
++            snprintf(resp->response_type.error.message, sizeof(resp->response_type.error.message),
++                     "Unable to save activity policy (%d)", err);
++        }
++        return 0;
+@@ -246,4 +244,0 @@
+-    zmk_settings_SetActivitySettingsResponse result =
+-        zmk_settings_SetActivitySettingsResponse_init_zero;
+-    result.success = success;
+-
+@@ -251,2 +246,2 @@
+-    resp->response_type.set_activity_settings = result;
+-    return success ? 0 : -1;
++    resp->response_type.set_activity_settings.success = true;
++    return 0;
+@@ -316,0 +312,2 @@
++    /* Confirm readback before sending optional UI notifications. */
++    nano35_activity_sync_report(ev);

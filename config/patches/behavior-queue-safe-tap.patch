@@ -1,0 +1,66 @@
+--- a/behavior_queue.c
++++ b/behavior_queue.c
+@@ -12,0 +13,1 @@
++#include <zephyr/sys/atomic.h>
+@@ -23,1 +24,2 @@
+-    uint32_t wait : 31;
++    bool tap : 1;
++    uint32_t wait : 30;
+@@ -28,0 +31,1 @@
++static void tap_release_handler(struct k_work *work);
+@@ -29,0 +33,17 @@
++static K_WORK_DELAYABLE_DEFINE(tap_release_work, tap_release_handler);
++static struct q_item pending_tap_release;
++static atomic_t tap_release_pending;
++
++static void tap_release_handler(struct k_work *work) {
++    ARG_UNUSED(work);
++    struct q_item item = pending_tap_release;
++    struct zmk_behavior_binding_event event = {.position = item.position,
++                                                .timestamp = k_uptime_get(),
++#if IS_ENABLED(CONFIG_ZMK_SPLIT)
++                                                .source = item.source
++#endif
++    };
++    zmk_behavior_invoke_binding(&item.binding, event, false);
++    atomic_clear(&tap_release_pending);
++    behavior_queue_process_next(&queue_work.work);
++}
+@@ -31,0 +52,3 @@
++    if (atomic_get(&tap_release_pending)) {
++        return;
++    }
+@@ -50,0 +74,8 @@
++        if (item.tap) {
++            pending_tap_release = item;
++            pending_tap_release.tap = false;
++            atomic_set(&tap_release_pending, 1);
++            k_work_schedule(&tap_release_work, K_MSEC(item.wait));
++            break;
++        }
++
+@@ -80,0 +112,24 @@
++    return 0;
++}
++
++
++int nano35_behavior_queue_add_tap(const struct zmk_behavior_binding_event *event,
++                                  const struct zmk_behavior_binding binding,
++                                  uint32_t duration_ms) {
++    struct q_item item = {
++        .press = true,
++        .tap = true,
++        .binding = binding,
++        .wait = duration_ms,
++        .position = event->position,
++#if IS_ENABLED(CONFIG_ZMK_SPLIT)
++        .source = event->source,
++#endif
++    };
++    const int ret = k_msgq_put(&zmk_behavior_queue_msgq, &item, K_NO_WAIT);
++    if (ret < 0) {
++        return ret;
++    }
++    if (!atomic_get(&tap_release_pending) && !k_work_delayable_is_pending(&queue_work)) {
++        behavior_queue_process_next(&queue_work.work);
++    }

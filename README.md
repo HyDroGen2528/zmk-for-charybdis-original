@@ -28,11 +28,11 @@ Nano35 的 35 鍵實體配置沿用現有 shield。`config/charybdis.keymap` 的
 原有五顆拇指鍵與其既有非穿透綁定保留；L8～L10 也改為無動作，供 Studio 日後配置。
 L5、L7 的上方三列全為無動作；L6 僅保留一般滑鼠三鍵，不會啟用來源的精細操作模式。
 目前拇指鍵可進入 L1／L2，I／O 可進入 L4／L5；L3、L6、L7 未安排實體切層鍵，可在 DYA Studio 自行設定。
-第 1 層的軌跡球捲動改由 dongle 處理，比例為 70 單位／格；其他層維持游標移動。
+軌跡球在第 1 層（NUM & ARROW）進入捲動，其他層維持游標移動；第 4 層（MOUSE）是滑鼠操作鍵層。BASE 的右旋鈕以 runtime sensor behavior 送出垂直捲動，每格約一個滾輪單位。
 RGB 燈效功能已移除，包含左右半部燈條、專用 SPI 匯流排、dongle 虛擬燈條及相關韌體設定。
 PMW3610 使用固定提交的 DYA RPC 驅動，保留 Nano35 共用 MOSI／MISO 資料腳的傳輸方式；游標／捲動分層仍在 dongle 執行。
 
-GitHub Actions 會依 `build.yaml` 建置以上四種韌體。Studio 的 `studio-rpc-usb-uart` snippet 只套用在 dongle。
+GitHub Actions 會依 `build.yaml` 建置以上四種韌體。Studio 的 `studio-rpc-usb-uart` snippet 只套用在 dongle。Build workflow 與相依模組版本均固定；每個成品附上編譯器、SDK、來源提交與相依版本資訊，最終 ZIP 另附 SHA-256 檢查檔。手動執行 workflow 可選擇額外建置右半部與 dongle 的 USB 記錄版。
 下載方式：登入 GitHub，開啟本專案的 **Actions → Build Nano35 SavingPower firmware**，選擇 `CharybdisNano35-SavingPower` 分支最近一次成功的執行，在 **Artifacts** 下載 `firmware` ZIP。
 其中包含左右半部、dongle 與設定重置的四個 UF2，檔名格式為 `<shield>-nice_nano_v2-zmk.uf2`。
 更新此省電版時，刷入同次建置的左右半部與 dongle 即可，不必清除 BLE 配對或重置 Studio 改鍵。
@@ -88,12 +88,14 @@ PMW3610 驅動固定為 `cormoran/zmk-driver-pmw3610-with-custom-studio-rpc@5c34
 - SPI 保持 GPIO CS 與分開的送位址／讀資料階段，沿用 Nano35 既有共用資料腳接線；一般動作採逐暫存器讀取，影像讀取以最多 240 bytes 分段並全程保持 CS。
 - 動作讀取與 Studio 操作共用 mutex；關閉 force-awake 時清除強制清醒位元。
 - PMW3610 與 Watchdog 的指定來源請求直接送至當前 BLE slot，避免廣播造成錯誤回覆或誤刪另一半部的記錄；僅感測器自動探索使用廣播。
-- Watchdog 回覆使用佇列保留連續的 incident chunks，避免未執行的工作資料被下一筆覆蓋。
+- Watchdog 回覆使用佇列保留連續的 incident chunks，避免未執行的工作資料被下一筆覆蓋。左右半部連線請求與回覆均保留來源與請求編號，佇列滿時回報忙碌或錯誤，不會把下一筆回覆配給錯誤的來源。
 
 Studio 的來源 1／2 是連線 slot，不保證固定代表左／右；請依裝置資訊與感測器探索結果選擇。左半部不建立空的感測器回覆介面。
 調整 PMW3610 設定時選擇感測器 `right` 所在的周邊來源；左手 VCC 在左半部來源的進階設定 `cormoran_custom_settings / nano35_left_vcc_enabled`。
 影像擷取會暫停感測器游標輸出，完成或停止後驅動重新初始化恢復；這是感測器偵錯操作，日常使用請停止串流。
 深睡預設關閉。自行開啟後可按鍵喚醒，需重新建立 BLE 連線；軌跡球不作為深睡喚醒來源。USB 供電時沿用 ZMK 的不自動深睡規則。
+活動省電設定透過 Studio 寫入後會同步左右半部並等待讀回確認；若任一側斷線，Studio 會回報尚待同步，連線恢復後自動重試。PMW3610 影像串流在 Studio 關閉、USB 主機斷線或達 60 秒上限時會停止；感測器端亦有獨立的 60 秒逾時保護。
+預設層選單限制為 BASE，避免連線或 OS 設定把鍵盤帶入空白層；11 層仍能在 Studio 編輯。按鍵圖中的空位置明確綁定 `&none`，避免執行時繼承下層按鍵。
 編譯與主機端檢查只能確認程式與協定邏輯，實際 SPI 電氣訊號、影像、BLE 轉送、喚醒與耗電仍須在實體鍵盤確認。
 可從 `91e8639` 與其 Actions 成品回復到先前省電版；不用為這次功能擴充清除 BLE 配對。
 
